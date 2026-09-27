@@ -1,0 +1,431 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { useStore } from '../store';
+import {
+  LayoutGrid, Plus, LogOut, Users, ArrowRight, RefreshCw,
+  Sparkles, Search, Crown, FolderOpen, ShieldCheck
+} from 'lucide-react';
+import ThemeSwitcher from './ThemeSwitcher';
+
+type HubTab = 'enter' | 'create';
+
+export default function WorkspaceHub() {
+  const {
+    user, workspaces, activeWorkspace, setActiveWorkspace,
+    createWorkspace, fetchWorkspaces, logout, navigateTo
+  } = useStore();
+
+  const [tab, setTab] = useState<HubTab>('enter');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [search, setSearch] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load the directory on mount without auto-entering a workspace.
+  useEffect(() => {
+    fetchWorkspaces({ autoEnter: false });
+  }, [fetchWorkspaces]);
+
+  // `memberIds` includes the owner, so its length is the true headcount.
+  const totalSeats = useMemo(
+    () => workspaces.reduce((sum, ws) => sum + (ws.memberIds?.length || 0), 0),
+    [workspaces]
+  );
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return workspaces;
+    return workspaces.filter(
+      (ws) =>
+        ws.name.toLowerCase().includes(q) ||
+        (ws.description || '').toLowerCase().includes(q)
+    );
+  }, [workspaces, search]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchWorkspaces({ autoEnter: false });
+    setIsRefreshing(false);
+  };
+
+  // Entering is an explicit choice: activate the workspace, then leave the hub.
+  const handleEnter = (ws: (typeof workspaces)[number]) => {
+    setActiveWorkspace(ws);
+    navigateTo('/workspace');
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed || isCreating) return;
+    setIsCreating(true);
+    setError(null);
+
+    const created = await createWorkspace(trimmed, description.trim());
+    if (!created) {
+      setError('Could not create the workspace. Please try again.');
+      setIsCreating(false);
+      return;
+    }
+
+    setName('');
+    setDescription('');
+    setIsCreating(false);
+    // Stay on the hub so the new room is visible in the list; the user
+    // chooses when to enter it.
+    setTab('enter');
+  };
+
+  const firstName = (user?.name || 'there').split(' ')[0];
+  const isAdmin = user?.role === 'admin';
+
+  return (
+    <div className="min-h-screen bg-ink text-cream font-sans relative overflow-hidden grain">
+      {/* Ambient background: one soft warm wash */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(48rem 34rem at 8% -6%, color-mix(in srgb, var(--color-ember) 8%, transparent), transparent 62%),' +
+            'radial-gradient(38rem 28rem at 96% 104%, color-mix(in srgb, var(--color-ember-soft) 7%, transparent), transparent 60%)',
+        }}
+      />
+
+      <div className="relative z-10 max-w-6xl mx-auto px-5 sm:px-8 py-10 sm:py-14">
+        {/* -- Top bar --------------------------------------------------- */}
+        <header className="flex items-center justify-between gap-4 mb-10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-ember to-ember-2 flex items-center justify-center text-on-ember font-bold text-sm shadow-lg shadow-ember/25">
+              {(user?.name || 'A').charAt(0).toUpperCase()}
+            </div>
+            <div className="leading-tight">
+              <p className="text-[13px] font-mono uppercase tracking-[0.18em] text-faint font-bold">Workspace Hub</p>
+              <p className="text-sm text-cream font-semibold">Welcome back, {firstName}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <ThemeSwitcher variant="panel" />
+            {isAdmin && (
+              <button
+                onClick={() => navigateTo('/admin/dashboard')}
+                className="px-3.5 py-2.5 rounded-xl bg-ember/10 border border-ember/25 text-ember-soft hover:bg-ember/20 transition-all cursor-pointer flex items-center gap-1.5 text-[14px] font-bold"
+              >
+                <ShieldCheck size={13} />
+                <span className="hidden sm:inline">Admin panel</span>
+                <span className="sm:hidden">Admin</span>
+              </button>
+            )}
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              title="Refresh directory"
+              className="p-2.5 rounded-xl bg-panel/80 border border-line/60 text-sand hover:text-cream hover:border-line-2 transition-all cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+            </button>
+            <button
+              onClick={logout}
+              className="px-3.5 py-2.5 rounded-xl bg-panel/80 border border-line/60 text-sand hover:text-rust hover:border-rose-500/30 transition-all cursor-pointer flex items-center gap-1.5 text-[14px] font-semibold"
+            >
+              <LogOut size={13} />
+              <span className="hidden sm:inline">Sign out</span>
+            </button>
+          </div>
+        </header>
+
+        {/* -- Heading --------------------------------------------------- */}
+        <div className="mb-8">
+          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-cream">
+            Choose where you want to <span className="text-ember">work</span>
+          </h1>
+          <p className="text-[13px] text-sand font-mono mt-2.5 max-w-xl leading-relaxed">
+            Pick an existing workspace or spin up a new one. Nothing loads into a
+            room until you choose it.
+          </p>
+        </div>
+
+        {/* -- Stat strip ------------------------------------------------ */}
+        <div className="grid grid-cols-2 gap-4 mb-8 max-w-md">
+          <StatCard
+            icon={<FolderOpen size={15} />}
+            label="Workspaces"
+            value={workspaces.length}
+            accent="text-ember"
+            bg="bg-ember/10"
+            border="border-ember/20"
+          />
+          <StatCard
+            icon={<Users size={15} />}
+            label="Seats held"
+            value={totalSeats}
+            accent="text-leaf"
+            bg="bg-leaf/10"
+            border="border-leaf/20"
+          />
+        </div>
+
+        {/* -- Admin entry ---------------------------------------------- */}
+        {isAdmin && (
+          <button
+            onClick={() => navigateTo('/admin/dashboard')}
+            className="group w-full text-left bg-gradient-to-br from-ember/12 to-ember/[0.03] border border-ember/25 rounded-2xl p-5 mb-8 hover:border-ember/45 hover:from-ember/20 transition-all duration-200 cursor-pointer"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-11 h-11 rounded-xl bg-ember/20 border border-ember/30 text-ember flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <ShieldCheck size={20} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-cream">Admin panel</p>
+                <p className="text-[14px] text-sand font-mono mt-0.5">
+                  Manage users, workspaces, analytics and audit logs
+                </p>
+              </div>
+              <ArrowRight size={16} className="text-ember shrink-0 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </button>
+        )}
+
+        {/* -- Action tabs ----------------------------------------------- */}
+        <div className="inline-flex items-center gap-1 p-1.5 rounded-2xl bg-panel/80 border border-line/60 mb-7">
+          <TabButton
+            active={tab === 'enter'}
+            onClick={() => setTab('enter')}
+            icon={<LayoutGrid size={13} />}
+            label="Enter a workspace"
+            count={workspaces.length}
+          />
+          <TabButton
+            active={tab === 'create'}
+            onClick={() => setTab('create')}
+            icon={<Plus size={13} />}
+            label="Create workspace"
+          />
+        </div>
+
+        {/* -- Panel ----------------------------------------------------- */}
+        {tab === 'enter' ? (
+          <section>
+            {workspaces.length > 4 && (
+              <div className="relative mb-5 max-w-sm">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Filter workspaces..."
+                  className="w-full bg-panel/80 border border-line/60 rounded-xl py-2.5 pl-10 pr-3 text-[13px] text-cream placeholder-faint focus:outline-none focus:border-ember/50 focus:ring-2 focus:ring-ember/10 transition-all"
+                />
+                <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-faint pointer-events-none" />
+              </div>
+            )}
+
+            {workspaces.length === 0 ? (
+              <EmptyState onCreate={() => setTab('create')} />
+            ) : visible.length === 0 ? (
+              <p className="text-[13px] text-faint italic py-10 text-center">No workspace matches &ldquo;{search}&rdquo;.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {visible.map((ws) => {
+                  const members = ws.memberIds?.length || 0;
+                  const isOwner = ws.ownerId === user?.id;
+                  const isCurrent = activeWorkspace?.id === ws.id;
+
+                  return (
+                    <article
+                      key={ws.id}
+                      className="group bg-panel/80 border border-line/60 rounded-2xl p-5 flex flex-col hover:border-ember/35 hover:bg-panel transition-all duration-200"
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-3.5">
+                        <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-ember/20 to-ember/5 border border-ember/20 text-ember font-bold text-sm flex items-center justify-center shrink-0">
+                          {ws.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex flex-col items-end gap-1.5">
+                          {isOwner && (
+                            <span className="px-2 py-0.5 rounded-md font-mono text-[13px] font-bold uppercase bg-amber-500/10 text-warn border border-amber-500/20 flex items-center gap-1">
+                              <Crown size={9} /> Owner
+                            </span>
+                          )}
+                          {isCurrent && (
+                            <span className="px-2 py-0.5 rounded-md font-mono text-[13px] font-bold uppercase bg-ember/10 text-ember border border-ember/20">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <h3 className="text-sm font-bold text-cream mb-1.5 truncate">{ws.name}</h3>
+                      <p className="text-[14px] text-sand leading-relaxed line-clamp-2 flex-1 mb-4">
+                        {ws.description || 'No description provided.'}
+                      </p>
+
+                      <div className="flex items-center justify-between pt-3.5 border-t border-line/50">
+                        <span className="flex items-center gap-1.5 font-mono text-[13px] text-faint font-semibold">
+                          <Users size={11} />
+                          {members} {members === 1 ? 'person' : 'people'}
+                        </span>
+
+                        <button
+                          onClick={() => handleEnter(ws)}
+                          className="px-3 py-1.5 rounded-xl bg-ember hover:bg-ember-2 text-on-ember text-[13px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-lg shadow-ember/20 btn-3d"
+                        >
+                          Enter
+                          <ArrowRight size={11} />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        ) : (
+          <section className="bg-panel/80 border border-line/60 rounded-2xl p-6 sm:p-7 max-w-xl">
+            <div className="flex items-center gap-2.5 mb-1.5">
+              <Sparkles size={15} className="text-ember" />
+              <h2 className="text-sm font-bold text-cream">New workspace</h2>
+            </div>
+            <p className="text-[14px] text-sand font-mono mb-6">
+              You'll be the owner, and the first member.
+            </p>
+
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div>
+                <label className="block text-[13px] font-mono font-bold uppercase tracking-widest text-faint mb-2">
+                  Name
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => { setName(e.target.value); setError(null); }}
+                  placeholder="e.g. Product Strategy"
+                  maxLength={60}
+                  required
+                  className="w-full bg-ink/50 border border-line/60 rounded-xl px-3.5 py-2.5 text-[13px] text-cream placeholder-faint focus:outline-none focus:border-ember/50 focus:ring-2 focus:ring-ember/10 transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[13px] font-mono font-bold uppercase tracking-widest text-faint mb-2">
+                  Description <span className="normal-case tracking-normal">(optional)</span>
+                </label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What is this room for?"
+                  rows={3}
+                  maxLength={280}
+                  className="w-full bg-ink/50 border border-line/60 rounded-xl px-3.5 py-2.5 text-[13px] text-cream placeholder-faint focus:outline-none focus:border-ember/50 focus:ring-2 focus:ring-ember/10 transition-all resize-none"
+                />
+              </div>
+
+              {error && (
+                <p className="text-[14px] text-rust bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+                  {error}
+                </p>
+              )}
+
+              <div className="flex items-center gap-2.5 pt-1">
+                <button
+                  type="submit"
+                  disabled={isCreating || !name.trim()}
+                  className="px-5 py-2.5 bg-ember hover:bg-ember-2 text-on-ember text-[13px] font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-ember/20 btn-3d"
+                >
+                  {isCreating ? (
+                    <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  ) : (
+                    <Plus size={13} />
+                  )}
+                  {isCreating ? 'Creating...' : 'Create workspace'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTab('enter')}
+                  className="px-4 py-2.5 text-faint hover:text-cream text-[13px] font-medium transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TabButton({
+  active, onClick, icon, label, count
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  count?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2.5 rounded-xl text-[14px] font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+        active
+          ? 'bg-ember text-on-ember shadow-lg shadow-ember/25'
+          : 'text-sand hover:text-cream hover:bg-panel-2'
+      }`}
+    >
+      {icon}
+      {label}
+      {count !== undefined && (
+        <span
+          className={`ml-0.5 px-1.5 py-0.5 rounded-md font-mono text-[13px] ${
+            active ? 'bg-ember text-on-ember' : 'bg-panel-2 text-faint'
+          }`}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function StatCard({
+  icon, label, value, accent, bg, border
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  accent: string;
+  bg: string;
+  border: string;
+}) {
+  return (
+    <div className="bg-panel/80 border border-line/60 rounded-2xl p-4">
+      <div className={`w-8 h-8 rounded-xl ${bg} ${border} border ${accent} flex items-center justify-center mb-2.5`}>
+        {icon}
+      </div>
+      <p className="text-2xl font-bold text-cream leading-none">{value}</p>
+      <p className="text-[13px] font-mono uppercase tracking-wider text-faint font-bold mt-1.5">{label}</p>
+    </div>
+  );
+}
+
+function EmptyState({ onCreate }: { onCreate: () => void }) {
+  return (
+    <div className="bg-panel/80 border border-line/60 rounded-2xl py-16 px-6 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-ember/10 border border-ember/20 text-ember flex items-center justify-center mx-auto mb-4">
+        <FolderOpen size={22} />
+      </div>
+      <h3 className="text-sm font-bold text-cream mb-1.5">No workspaces yet</h3>
+      <p className="text-[14px] text-sand font-mono mb-6 max-w-sm mx-auto leading-relaxed">
+        You're not in any rooms. Create the first one to start collaborating.
+      </p>
+      <button
+        onClick={onCreate}
+        className="px-5 py-2.5 bg-ember hover:bg-ember-2 text-on-ember text-[13px] font-bold rounded-xl transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-lg shadow-ember/20 btn-3d"
+      >
+        <Plus size={13} />
+        Create your first workspace
+      </button>
+    </div>
+  );
+}

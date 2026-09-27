@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40" fill="none">
+  <defs>
+    <linearGradient id="synapse-grad" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="50%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#4338ca"/>
+    </linearGradient>
+    <linearGradient id="synapse-glow" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#4338ca" stop-opacity="0.07"/>
+    </linearGradient>
+  </defs>
+  <!-- Neural Synapse Icon Mark -->
+  <g transform="translate(2, 2)">
+    <!-- Outer glow ring -->
+    <circle cx="18" cy="18" r="17" fill="url(#synapse-glow)" stroke="url(#synapse-grad)" stroke-width="0.5" opacity="0.4"/>
+    <!-- Central synapse paths (neural connections) -->
+    <path d="M10 24 L18 8 L26 24" stroke="url(#synapse-grad)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <path d="M10 24 L26 24" stroke="url(#synapse-grad)" stroke-width="1.2" stroke-linecap="round" opacity="0.6"/>
+    <!-- Signal flow curves -->
+    <path d="M14 16 Q18 20 22 16" stroke="#6366f1" stroke-width="1" stroke-linecap="round" fill="none" opacity="0.7"/>
+    <path d="M12 20 Q18 24 24 20" stroke="#4338ca" stroke-width="0.8" stroke-linecap="round" fill="none" opacity="0.5"/>
+    <!-- Neural nodes -->
+    <circle cx="18" cy="8" r="2.5" fill="url(#synapse-grad)"/>
+    <circle cx="10" cy="24" r="2.2" fill="#4f46e5"/>
+    <circle cx="26" cy="24" r="2.2" fill="#4338ca"/>
+    <!-- Inner pulse dots -->
+    <circle cx="18" cy="8" r="1" fill="white" opacity="0.9"/>
+    <circle cx="10" cy="24" r="0.8" fill="white" opacity="0.7"/>
+    <circle cx="26" cy="24" r="0.8" fill="white" opacity="0.7"/>
+  </g>
+  <!-- Wordmark -->
+  <text x="46" y="26" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="700" font-size="18" fill="#33322c" letter-spacing="-0.5">Synapse</text>
+  <text x="127" y="26" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-weight="700" font-size="18" fill="#4f46e5" letter-spacing="-0.5">AI</text>
+</svg>

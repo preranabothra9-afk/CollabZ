@@ -1,0 +1,14 @@
+node_modules/
+build/
+dist/
+coverage/
+
+.DS_Store
+devtest.log
+
+*.log
+
+.env
+.env.*
+!.env.example
+.git-backup/

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- ─── Theme bootstrap (runs before paint to prevent flash) ─────── -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('collabz-theme');
+        if (t !== 'light' && t !== 'dark' && t !== 'nebula') {
+          t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        if (t === 'dark' || t === 'nebula') document.documentElement.classList.add(t);
+        document.documentElement.style.colorScheme = (t === 'light') ? 'light' : 'dark';
+      } catch (e) {}
+    })();
+  </script>
+
+  <!-- ─── Primary Title ─────────────────────────────────────────── -->
+  <title>CollabZ — Real-Time AI Collaboration Platform</title>
+
+  <!-- ─── SEO Meta Tags ─────────────────────────────────────────── -->
+  <meta name="description" content="CollabZ is a real-time multi-model AI collaboration platform. Stream responses from multiple AI models side-by-side, collaborate in shared workspaces, and gain enterprise-grade analytics — all in one unified interface." />
+  <meta name="keywords" content="AI collaboration, multi-model AI, real-time AI streaming, AI SaaS platform, collaborative AI workspace, enterprise AI, AI comparison tool, parallel AI inference, team AI workspace, AI analytics dashboard" />
+  <meta name="author" content="CollabZ Engineering" />
+  <meta name="robots" content="index, follow" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0a0b10" media="(prefers-color-scheme: dark)" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="application-name" content="CollabZ" />
+  <meta name="apple-mobile-web-app-title" content="CollabZ" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="msapplication-TileColor" content="#ffffff" />
+  <meta name="msapplication-config" content="/browserconfig.xml" />
+
+  <!-- ─── OpenGraph / Social Preview ────────────────────────────── -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="CollabZ — Real-Time AI Collaboration Platform" />
+  <meta property="og:description" content="Stream, compare, and collaborate with multiple AI models in real-time. Enterprise-grade multi-model AI workspace for teams." />
+  <meta property="og:image" content="/og-preview.png" />
+  <meta property="og:url" content="https://collabz.dev" />
+  <meta property="og:site_name" content="CollabZ" />
+  <meta property="og:locale" content="en_US" />
+
+  <!-- ─── Twitter / X Card ──────────────────────────────────────── -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="CollabZ — Real-Time AI Collaboration Platform" />
+  <meta name="twitter:description" content="Real-time multi-model AI streaming, side-by-side comparison, and collaborative workspaces. Built for teams." />
+  <meta name="twitter:image" content="/og-preview.png" />
+  <meta name="twitter:site" content="@collabz" />
+
+  <!-- ─── Favicon System ────────────────────────────────────────── -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+
+  <!-- ─── PWA Manifest ──────────────────────────────────────────── -->
+  <link rel="manifest" href="/site.webmanifest" />
+
+  <!-- ─── Preconnect & Typography ───────────────────────────────── -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Mulish:wght@200..1000&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- ─── Branded Loading Fallback ──────────────────────────────── -->
+  <style>
+    :root {
+      --brand-primary: #0f6b6b;
+      --brand-secondary: #094a4a;
+      --brand-accent: #22a19a;
+      --brand-surface: #fbf6ef;
+      --brand-surface-elevated: #ffffff;
+      --brand-faint: #7e6e5e;
+    }
+
+    html.dark {
+      --brand-surface: #171310;
+      --brand-surface-elevated: #201a16;
+      --brand-faint: #9d8a79;
+      --brand-primary: #45c4b8;
+      --brand-secondary: #6fd8cc;
+      --brand-accent: #9ae6dc;
+    }
+
+    html.nebula {
+      --brand-surface: #1a1620;
+      --brand-surface-elevated: #241e2c;
+      --brand-faint: #9b8fa0;
+      --brand-primary: #3fb8ae;
+      --brand-secondary: #63cfc5;
+      --brand-accent: #8fded4;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--brand-surface);
+      font-family: 'Mulish', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Branded splash screen — visible before React hydrates */
+    #root:empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: var(--brand-surface);
+    }
+
+    #root:empty::before {
+      content: '';
+      width: 48px;
+      height: 48px;
+      border: 2px solid transparent;
+      border-top-color: var(--brand-primary);
+      border-right-color: var(--brand-secondary);
+      border-radius: 50%;
+      animation: synapse-spin 1s linear infinite;
+    }
+
+    #root:empty::after {
+      content: 'CollabZ';
+      position: absolute;
+      bottom: calc(50% - 50px);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--brand-faint);
+      font-family: 'Mulish', system-ui, sans-serif;
+    }
+
+    @keyframes synapse-spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>
