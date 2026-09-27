@@ -29,7 +29,7 @@ async function startServer() {
   app.set('trust proxy', 1);
 
   const server = createServer(app);
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // 1. High-security headers using Helmet
   app.use(helmet({
