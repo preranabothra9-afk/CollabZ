@@ -386,7 +386,7 @@ export default function HomePage() {
 /* ── Data ────────────────────────────────────────────────────────────── */
 
 const MARQUEE = [
-  'Gemini 3.5 Flash', 'GPT-OSS 120B', 'Qwen3.8 27B', 'Parallel streaming',
+  'Gemini 2.5 Flash', 'GPT-OSS 120B', 'Qwen3.8 27B', 'Parallel streaming',
   'Side-by-side diff', 'Live presence', 'Pinned insights', 'Audit logs',
 ];
 
@@ -618,7 +618,7 @@ function HeroMock() {
 
 const MOCK_MODELS = [
   {
-    name: 'Gemini 3.5 Flash', dot: 'bg-ember', status: '412ms', statusCls: 'text-ember',
+    name: 'Gemini 2.5 Flash', dot: 'bg-ember', status: '412ms', statusCls: 'text-ember',
     lines: [94, 70, 86, 58], quality: 78, live: false,
   },
   {

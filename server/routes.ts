@@ -280,15 +280,30 @@ router.delete('/conversations/:id', requireAuth, async (req: AuthenticatedReques
 });
 
 // --- MESSAGES ROUTER ---
-// Get messages for conversation (with pagination support)
+// Get messages for conversation (cursor pagination, newest page first)
 router.get('/messages/:conversationId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 50;
-    const page = parseInt(req.query.page as string) || 1;
-    const history = await db.getMessages(req.params.conversationId, limit, page);
-    return res.status(200).json(history);
+    const before = (req.query.before as string) || undefined;
+    const beforeId = (req.query.beforeId as string) || undefined;
+    const result = await db.getMessages(req.params.conversationId, { limit, before, beforeId });
+    return res.status(200).json(result);
   } catch (err: any) {
     return res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+// Search across a room's prompts and model responses
+router.get('/messages/:conversationId/search', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const q = ((req.query.q as string) || '').trim();
+    if (q.length < 2) {
+      return res.status(400).json({ error: 'Search query must be at least 2 characters' });
+    }
+    const results = await db.searchMessages(req.params.conversationId, q);
+    return res.status(200).json({ results });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to search messages' });
   }
 });
 

@@ -3,7 +3,12 @@ import { X, Copy, Trash2, ClipboardCheck, Bookmark } from 'lucide-react';
 import React, { useState } from 'react';
 
 export default function SavedResponses() {
-  const { savedResponses, deleteSavedResponse, isSavedResponsesOpen, setSavedResponsesOpen } = useStore();
+  // Selectors: this drawer stays mounted while models stream, so a whole-store
+  // subscription would re-render it on every token.
+  const savedResponses = useStore((s) => s.savedResponses);
+  const deleteSavedResponse = useStore((s) => s.deleteSavedResponse);
+  const isSavedResponsesOpen = useStore((s) => s.isSavedResponsesOpen);
+  const setSavedResponsesOpen = useStore((s) => s.setSavedResponsesOpen);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const handleCopy = (text: string, id: string) => {

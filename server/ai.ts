@@ -41,13 +41,13 @@ export interface AIModelConfig {
 }
 
 export const AI_MODELS: Record<string, AIModelConfig> = {
-  'gemini-3.5-flash': {
-    id: 'gemini-3.5-flash',
-    name: 'Gemini 3.5 Flash',
+  'gemini-2.5-flash': {
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
     provider: 'google',
     lab: 'Google',
     transport: 'google-sdk',
-    upstreamModel: 'gemini-3.5-flash',
+    upstreamModel: 'gemini-2.5-flash',
     apiKeyEnv: 'GEMINI_API_KEY',
     signupUrl: 'https://aistudio.google.com/apikey',
     freeTier: 'Free tier, no credit card',
@@ -142,7 +142,7 @@ export const AI_MODELS: Record<string, AIModelConfig> = {
  * labs, all reachable on a genuine no-cost tier with only two signups
  * (Google AI Studio + Groq).
  */
-export const DEFAULT_COMPARISON_MODELS = ['gemini-3.5-flash', 'gpt-oss-120b', 'qwen3.8-27b'];
+export const DEFAULT_COMPARISON_MODELS = ['gemini-2.5-flash', 'gpt-oss-120b', 'qwen3.8-27b'];
 
 const OPENAI_COMPAT_BASE_URLS: Record<Exclude<AIProvider, 'google'>, string> = {
   groq: 'https://api.groq.com/openai/v1',
@@ -215,8 +215,8 @@ export function getGeminiClient(): GoogleGenAI | null {
 // Helper to retry an operation with exponential backoff on transient/rate-limiting errors
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
-  retries = 2,           // Reduced to 2 retries to speed up cascading to fallback models faster
-  delay = 500,           // Reduced initial delay for better user responsiveness
+  retries = 1,           // Keep retries low so a failing model cascades quickly
+  delay = 250,           // Short initial delay for responsiveness
   backoffFactor = 2
 ): Promise<T> {
   try {
@@ -270,7 +270,8 @@ export async function streamOpenAICompatible(
   prompt: string,
   onChunk: (text: string) => void,
   onComplete: (fullText: string) => void,
-  onError: (errMessage: string) => void
+  onError: (errMessage: string) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const apiKey = process.env[config.apiKeyEnv]?.trim();
   if (!apiKey) {
@@ -280,7 +281,23 @@ export async function streamOpenAICompatible(
 
   const baseUrl = (config.baseUrl || OPENAI_COMPAT_BASE_URLS[config.provider as Exclude<AIProvider, 'google'>]).replace(/\/+$/, '');
   const controller = new AbortController();
+  let stopped = false;
+  // Forward an external stop (user pressed Stop) into this request.
+  if (signal) {
+    if (signal.aborted) {
+      onComplete('');
+      return;
+    }
+    signal.addEventListener('abort', () => {
+      stopped = true;
+      controller.abort();
+    }, { once: true });
+  }
   const timeout = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+
+  // Kept at function scope so a stop or mid-stream failure can still persist
+  // whatever text was already delivered to the client.
+  let fullText = '';
 
   try {
     const body: Record<string, unknown> = {
@@ -304,7 +321,9 @@ export async function streamOpenAICompatible(
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
-      onError(extractUpstreamError(errorBody, response.status));
+      const message = extractUpstreamError(errorBody, response.status);
+      console.error(`[ai] ${config.name} (${config.upstreamModel}) upstream rejected request: ${message}`);
+      onError(message);
       return;
     }
 
@@ -331,7 +350,6 @@ export async function streamOpenAICompatible(
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let fullText = '';
     let received = false;
     let finished = false;
 
@@ -353,6 +371,7 @@ export async function streamOpenAICompatible(
     };
 
     while (!finished) {
+      if (stopped) break;
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -374,25 +393,45 @@ export async function streamOpenAICompatible(
 
     // Flush any trailing frame that arrived without a newline.
     const tail = buffer.trim();
-    if (tail.startsWith('data:')) {
+    if (!stopped && tail.startsWith('data:')) {
       const payload = tail.slice(5).trim();
       if (payload !== '[DONE]') handlePayload(payload);
     }
 
+    // A user-requested stop completes with whatever was already streamed.
+    if (stopped) {
+      onComplete(fullText);
+      return;
+    }
+
     if (!received && !fullText) {
+      const reason = `${config.name}: upstream closed the stream without returning any content.`;
+      console.error(`[ai] ${reason} model=${config.upstreamModel} baseUrl=${baseUrl}`);
       onError('Upstream provider closed the stream without returning any content.');
       return;
     }
 
     onComplete(fullText);
   } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      onError(`Request to ${config.name} timed out after ${STREAM_TIMEOUT_MS / 1000}s.`);
+    if (stopped) {
+      // User pressed Stop: finish with the partial text instead of an error.
+      onComplete(fullText);
       return;
     }
+    if (err?.name === 'AbortError') {
+      const message = `Request to ${config.name} timed out after ${STREAM_TIMEOUT_MS / 1000}s.`;
+      console.error(`[ai] ${message} model=${config.upstreamModel}`);
+      onError(message);
+      return;
+    }
+    console.error(`[ai] ${config.name} (${config.upstreamModel}) stream failed:`, err?.message || err);
     onError(err?.message || String(err));
   } finally {
     clearTimeout(timeout);
+    if (signal) {
+      // Listener was registered with once:true; safe to no-op if already gone.
+      try { signal.removeEventListener('abort', () => {}); } catch { /* noop */ }
+    }
   }
 }
 
@@ -529,30 +568,25 @@ export async function getGeminiTextResponse(prompt: string): Promise<string> {
     return 'Gemini API not configured. Add GEMINI_API_KEY to the server .env file and restart the server.';
   }
 
-  const tryGenerate = async (modelName: string) => {
-    const response = await retryWithBackoff(() => client.models.generateContent({
-      model: modelName,
-      contents: prompt,
-    }));
-    return response.text || 'No response returned from Gemini.';
-  };
+  const cascade = ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+  const failures: string[] = [];
 
-  try {
-    return await tryGenerate('gemini-3.5-flash');
-  } catch (error: any) {
-    console.warn('getGeminiTextResponse: gemini-3.5-flash failed. Trialling fallback model gemini-3.1-flash-lite...', error);
+  for (const modelName of cascade) {
     try {
-      return await tryGenerate('gemini-3.1-flash-lite');
-    } catch (fallbackError: any) {
-      console.warn('getGeminiTextResponse: gemini-3.1-flash-lite failed. Trialling fallback model gemini-flash-latest...', fallbackError);
-      try {
-        return await tryGenerate('gemini-flash-latest');
-      } catch (lastError: any) {
-        console.error('All Gemini text response models failed. Triggering offline fallback:', lastError);
-        return generateOfflineFallbackResponse(prompt);
-      }
+      const response = await retryWithBackoff(() => client.models.generateContent({
+        model: modelName,
+        contents: prompt,
+      }));
+      return response.text || 'No response returned from Gemini.';
+    } catch (error: any) {
+      const message = (error?.message || String(error)).replace(/\s+/g, ' ').trim();
+      failures.push(`${modelName} -> ${message.slice(0, 200)}`);
+      console.warn(`[ai] Gemini text call ${modelName} failed, trying next fallback: ${message.slice(0, 200)}`);
     }
   }
+
+  console.error(`[ai] Every Gemini text model failed. ${failures.join(' | ')}`);
+  return generateOfflineFallbackResponse(prompt);
 }
 
 /**
@@ -562,14 +596,15 @@ export async function streamRealGemini(
   prompt: string,
   onChunk: (text: string) => void,
   onComplete: (fullText: string) => void,
-  onError: (errMessage: string) => void
+  onError: (errMessage: string) => void,
+  signal?: AbortSignal
 ) {
   const client = getGeminiClient();
   if (!client) {
     // Explain exactly which variable is missing instead of faking a model answer.
     return streamNotice(
-      'gemini-3.5-flash',
-      buildCredentialNotice('gemini-3.5-flash'),
+      'gemini-2.5-flash',
+      buildCredentialNotice('gemini-2.5-flash'),
       onChunk,
       onComplete
     );
@@ -583,35 +618,52 @@ export async function streamRealGemini(
 
     let fullText = '';
     for await (const chunk of stream) {
+      // User pressed Stop: return what we already streamed.
+      if (signal?.aborted) return { text: fullText, stopped: true };
       const text = chunk.text || '';
       if (text) {
         fullText += text;
         onChunk(text);
       }
     }
-    return fullText;
+    return { text: fullText, stopped: false };
   };
 
-  try {
-    const result = await tryStream('gemini-3.5-flash');
-    onComplete(result);
-  } catch (error: any) {
-    console.warn(`streamRealGemini: gemini-3.5-flash failed or throttled. Initiating fallback to gemini-3.1-flash-lite...`, error);
+  // Fast, healthy models first: gemini-2.5-flash measures ~2.8s to first token
+  // while gemini-3.5-flash has been measured above 11s on the free tier.
+  const cascade = ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+  const failures: string[] = [];
+
+  for (const modelName of cascade) {
+    if (signal?.aborted) {
+      onComplete('');
+      return;
+    }
     try {
-      const result = await tryStream('gemini-3.1-flash-lite');
-      onComplete(result);
-    } catch (fallbackError: any) {
-      console.warn(`streamRealGemini: gemini-3.1-flash-lite failed. Initiating fallback to gemini-flash-latest...`, fallbackError);
-      try {
-        const result = await tryStream('gemini-flash-latest');
-        onComplete(result);
-      } catch (lastError: any) {
-        console.error('All Gemini streaming models failed. Engaging Workspace Offline Recovery Fallback:', lastError);
-        // Cascade to local simulation so that user's chat workflow is never interrupted
-        streamOfflineFallback(prompt, onChunk, onComplete);
-      }
+      const { text, stopped } = await tryStream(modelName);
+      onComplete(text);
+      if (stopped) console.warn(`[ai] Gemini stream ${modelName} stopped by user with ${text.length} chars delivered`);
+      return;
+    } catch (err: any) {
+      const message = (err?.message || String(err)).replace(/\s+/g, ' ').trim();
+      failures.push(`${modelName} -> ${message.slice(0, 200)}`);
+      console.warn(`[ai] Gemini model ${modelName} failed, trying next fallback: ${message.slice(0, 200)}`);
     }
   }
+
+  console.error(`[ai] Every Gemini model failed. ${failures.join(' | ')}`);
+
+  // Configuration problems (bad/invalid key, unknown model) should be reported
+  // honestly rather than answered with a local canned message.
+  const configError = failures.find((f) => /\b(401|403|404)\b/.test(f));
+  if (configError) {
+    onError(`Gemini request failed: ${configError}`);
+    return;
+  }
+
+  // Transient capacity errors (429/503): keep the workspace responsive with the
+  // local offline recovery response instead of an empty card.
+  streamOfflineFallback(prompt, onChunk, onComplete);
 }
 
 /**
@@ -661,7 +713,8 @@ export async function streamModel(
   prompt: string,
   onChunk: (text: string) => void,
   onComplete: (fullText: string) => void,
-  onError: (errMessage: string) => void
+  onError: (errMessage: string) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const config = AI_MODELS[modelKey];
 
@@ -676,9 +729,9 @@ export async function streamModel(
   }
 
   if (config.transport === 'google-sdk') {
-    await streamRealGemini(prompt, onChunk, onComplete, onError);
+    await streamRealGemini(prompt, onChunk, onComplete, onError, signal);
     return;
   }
 
-  await streamOpenAICompatible(config, prompt, onChunk, onComplete, onError);
+  await streamOpenAICompatible(config, prompt, onChunk, onComplete, onError, signal);
 }

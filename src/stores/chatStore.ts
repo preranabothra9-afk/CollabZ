@@ -9,6 +9,9 @@ export interface ChatState {
   presence: PresenceUser[];
   collaborativePromptText: string;
   whoIsEditing: string | null;
+  hasMoreMessages: boolean;
+  isLoadingOlder: boolean;
+  highlightMessageId: string | null;
 
   setConversations: (conversations: Conversation[]) => void;
   setActiveConversation: (conv: Conversation | null) => void;
@@ -17,6 +20,9 @@ export interface ChatState {
   setPresence: (presence: PresenceUser[]) => void;
   setCollaborativePromptText: (text: string) => void;
   setWhoIsEditing: (who: string | null) => void;
+  setHasMoreMessages: (hasMore: boolean) => void;
+  setIsLoadingOlder: (loading: boolean) => void;
+  setHighlightMessageId: (id: string | null) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -27,12 +33,18 @@ export const useChatStore = create<ChatState>((set) => ({
   presence: [],
   collaborativePromptText: '',
   whoIsEditing: null,
+  hasMoreMessages: false,
+  isLoadingOlder: false,
+  highlightMessageId: null,
 
   setConversations: (conversations) => set({ conversations }),
-  setActiveConversation: (activeConversation) => set({ activeConversation, messages: [] }),
+  setActiveConversation: (activeConversation) => set({ activeConversation, messages: [], hasMoreMessages: false }),
   setMessages: (messages) => set({ messages }),
   setSavedResponses: (savedResponses) => set({ savedResponses }),
   setPresence: (presence) => set({ presence }),
   setCollaborativePromptText: (collaborativePromptText) => set({ collaborativePromptText }),
-  setWhoIsEditing: (whoIsEditing) => set({ whoIsEditing })
+  setWhoIsEditing: (whoIsEditing) => set({ whoIsEditing }),
+  setHasMoreMessages: (hasMoreMessages) => set({ hasMoreMessages }),
+  setIsLoadingOlder: (isLoadingOlder) => set({ isLoadingOlder }),
+  setHighlightMessageId: (highlightMessageId) => set({ highlightMessageId }),
 }));

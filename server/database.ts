@@ -218,9 +218,9 @@ async function seedDefaultMongoData() {
         senderAvatar: 'SYSTEM',
         promptText: 'Analyze CollabZ workspace architecture.',
         modelResponses: {
-          'gemini-3.5-flash': {
-            modelName: 'Gemini 3.5 Flash',
-            content: 'Hello! I am Gemini 3.5 Flash. I am fully integrated into **CollabZ** to support streamable team diagnostics, dynamic modeling, and high-fidelity code execution. In this workspace, you can trigger models simultaneously and compare results, observe live presence, edit prompts collaboratively, and save insights instantly.',
+          'gemini-2.5-flash': {
+            modelName: 'Gemini 2.5 Flash',
+            content: 'Hello! I am Gemini 2.5 Flash. I am fully integrated into **CollabZ** to support streamable team diagnostics, dynamic modeling, and high-fidelity code execution. In this workspace, you can trigger models simultaneously and compare results, observe live presence, edit prompts collaboratively, and save insights instantly.',
             status: 'completed',
             durationMs: 420
           },
@@ -420,13 +420,125 @@ class MongoDatabaseAdapter {
   }
 
   // --- MESSAGE METHODS ---
-  async getMessages(conversationId: string, limit: number = 50, page: number = 1): Promise<Message[]> {
-    const docs = await MessageModel.find({ conversationId })
-      .sort({ createdAt: 1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
+
+  /**
+   * Load a page of messages, newest-first retrieval, returned in chronological
+   * order for display. Cursor-based so the client can page backwards through
+   * full history without skip-offset drift.
+   *
+   * `before`/`beforeId` identify the oldest currently-loaded message; the page
+   * returned is everything strictly older than that (createdAt, _id) tuple.
+   * Both sort keys are ISO strings / UUIDs, so lexicographic == chronological.
+   */
+  async getMessages(
+    conversationId: string,
+    opts: { limit?: number; before?: string; beforeId?: string } = {}
+  ): Promise<{ messages: Message[]; hasMore: boolean }> {
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const query: Record<string, unknown> = { conversationId };
+
+    if (opts.before) {
+      if (opts.beforeId) {
+        query.$or = [
+          { createdAt: { $lt: opts.before } },
+          { createdAt: opts.before, _id: { $lt: opts.beforeId } },
+        ];
+      } else {
+        query.createdAt = { $lt: opts.before };
+      }
+    }
+
+    // Take limit + 1 to peek whether another page exists, then chronological order.
+    const docs = await MessageModel.find(query)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit + 1)
       .lean();
-    return docs.map((d: any) => ({ ...d, id: d._id })) as unknown as Message[];
+
+    const hasMore = docs.length > limit;
+    const page = docs.slice(0, limit).reverse();
+    return { messages: page as unknown as Message[], hasMore };
+  }
+
+  /** Build a short snippet centered on the first match of `q` within `text`. */
+  private snippet(text: string, q: string, radius = 70): string {
+    const idx = text.toLowerCase().indexOf(q.toLowerCase());
+    if (idx === -1) return text.slice(0, radius * 2);
+    const start = Math.max(0, idx - radius);
+    const end = Math.min(text.length, idx + q.length + radius);
+    return (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : '');
+  }
+
+  /**
+   * Case-insensitive regex search across a room's prompts and every model
+   * response. Returns compact hits (no full response bodies) plus a snippet
+   * and where the match was found.
+   *
+   * Model keys contain dots (e.g. "gemini-2.5-flash"), so response content
+   * can't be reached with dot notation — an aggregation flattens
+   * `modelResponses` into an array of contents first.
+   */
+  async searchMessages(
+    conversationId: string,
+    query: string,
+    limit = 20
+  ): Promise<Array<{
+    id: string;
+    promptText: string;
+    createdAt: string;
+    senderName: string;
+    matchedIn: string;
+    snippet: string;
+  }>> {
+    const esc = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const docs = await MessageModel.aggregate([
+      { $match: { conversationId } },
+      // Flatten the dynamic-key modelResponses map into a plain content array
+      { $addFields: {
+          _contents: {
+            $map: {
+              input: { $objectToArray: { $ifNull: ['$modelResponses', {}] } },
+              as: 'entry',
+              in: { name: '$$entry.v.modelName', content: '$$entry.v.content' },
+            },
+          },
+        },
+      },
+      { $match: {
+          $or: [
+            { promptText: { $regex: esc, $options: 'i' } },
+            { '_contents.content': { $regex: esc, $options: 'i' } },
+          ],
+        },
+      },
+      { $sort: { createdAt: -1 } },
+      { $limit: limit },
+    ]);
+
+    return docs.map((d: any) => {
+      const q = query.toLowerCase();
+      const promptHit = d.promptText?.toLowerCase().includes(q);
+      let matchedIn = 'Prompt';
+      let snippetText = d.promptText || '';
+
+      if (!promptHit && Array.isArray(d._contents)) {
+        for (const c of d._contents) {
+          if (typeof c?.content === 'string' && c.content.toLowerCase().includes(q)) {
+            matchedIn = c.name || 'Response';
+            snippetText = c.content;
+            break;
+          }
+        }
+      }
+
+      return {
+        id: d._id,
+        promptText: d.promptText,
+        createdAt: d.createdAt,
+        senderName: d.senderName,
+        matchedIn,
+        snippet: this.snippet(snippetText, query),
+      };
+    });
   }
 
   async getMessageById(id: string): Promise<Message | undefined> {

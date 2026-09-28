@@ -47,7 +47,7 @@ export interface Message {
     [modelKey: string]: {
       modelName: string;
       content: string;
-      status: 'pending' | 'streaming' | 'completed' | 'failed';
+      status: 'pending' | 'streaming' | 'completed' | 'stopped' | 'failed';
       durationMs?: number;
       error?: string;
     };

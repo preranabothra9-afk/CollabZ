@@ -1,8 +1,9 @@
 import { useStore } from '../store';
 import { Hash, Users, BookmarkCheck, Cpu, Circle, Wifi, LayoutGrid } from 'lucide-react';
+import SearchPanel from './SearchPanel';
 
 const MODEL_LABELS: Record<string, string> = {
-  'gemini-3.5-flash': 'Gemini 3.5',
+  'gemini-2.5-flash': 'Gemini 2.5',
   'gpt-oss-120b': 'GPT-OSS 120B',
   'qwen3.8-27b': 'Qwen3.8 27B',
   'gpt-oss-20b': 'GPT-OSS 20B',
@@ -12,7 +13,7 @@ const MODEL_LABELS: Record<string, string> = {
 };
 
 const MODEL_COLORS: Record<string, string> = {
-  'gemini-3.5-flash': 'bg-blue-500/10 text-cat-blue border-blue-500/20',
+  'gemini-2.5-flash': 'bg-blue-500/10 text-cat-blue border-blue-500/20',
   'gpt-oss-120b': 'bg-emerald-500/10 text-leaf border-emerald-500/20',
   'qwen3.8-27b': 'bg-violet-500/10 text-cat-violet border-violet-500/20',
   'gpt-oss-20b': 'bg-amber-500/10 text-warn border-amber-500/20',
@@ -22,7 +23,16 @@ const MODEL_COLORS: Record<string, string> = {
 };
 
 export default function WorkspaceHeader() {
-  const { activeConversation, activeWorkspace, presence, selectedModels, isSavedResponsesOpen, setSavedResponsesOpen, socketConnected, navigateTo } = useStore();
+  // Fine-grained selectors — otherwise this header re-renders on every token
+  // a model streams, since the store swaps `messages` per chunk.
+  const activeConversation = useStore((s) => s.activeConversation);
+  const activeWorkspace = useStore((s) => s.activeWorkspace);
+  const presence = useStore((s) => s.presence);
+  const selectedModels = useStore((s) => s.selectedModels);
+  const isSavedResponsesOpen = useStore((s) => s.isSavedResponsesOpen);
+  const setSavedResponsesOpen = useStore((s) => s.setSavedResponsesOpen);
+  const socketConnected = useStore((s) => s.socketConnected);
+  const navigateTo = useStore((s) => s.navigateTo);
 
   const seen = new Set<string>();
   const online = presence.filter((p) => { if (seen.has(p.userId)) return false; seen.add(p.userId); return true; });
@@ -84,6 +94,9 @@ export default function WorkspaceHeader() {
       )}
 
       <div className="w-px h-5 bg-line/60" />
+
+      {/* Room search */}
+      <SearchPanel />
 
       {/* Pinned Toggle */}
       <button type="button" onClick={() => setSavedResponsesOpen(!isSavedResponsesOpen)}

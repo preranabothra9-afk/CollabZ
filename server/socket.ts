@@ -18,6 +18,15 @@ interface SocketMeta {
 }
 const activeSockets: Record<string, SocketMeta> = {};
 
+// Active generation jobs: `${messageId}:${modelKey}` -> abort handle.
+// Lets a user stop a single model (or all models of a message) mid-stream.
+interface ActiveGeneration {
+  controller: AbortController;
+  /** True once the user requested a stop; completion/error callbacks then save a 'stopped' status. */
+  stopped: boolean;
+}
+const activeGenerations: Map<string, ActiveGeneration> = new Map();
+
 // Globally accessible Socket Server reference for route-based messaging
 let globalIo: SocketServer | null = null;
 
@@ -217,7 +226,7 @@ export function setupSocketIO(server: HttpServer) {
       workspaceId: string;
       conversationId: string;
       promptText: string;
-      selectedModels: string[]; // e.g. ["gemini-3.5-flash", "gpt-oss-120b", "qwen3.8-27b"]
+      selectedModels: string[]; // e.g. ["gemini-2.5-flash", "gpt-oss-120b", "qwen3.8-27b"]
       userId: string;
       userName: string;
       userAvatar: string;
@@ -296,6 +305,11 @@ export function setupSocketIO(server: HttpServer) {
           let fullContent = '';
           const startTime = Date.now();
 
+          const generationKey = `${messageId}:${modelKey}`;
+          const controller = new AbortController();
+          const generation: ActiveGeneration = { controller, stopped: false };
+          activeGenerations.set(generationKey, generation);
+
           const onChunkCallback = (chunk: string) => {
             fullContent += chunk;
             // Emit traditional chunk
@@ -312,7 +326,37 @@ export function setupSocketIO(server: HttpServer) {
             });
           };
 
+          // Saves a user-requested stop with whatever text was already streamed.
+          const completeStopped = async () => {
+            const durationMs = Date.now() - startTime;
+            const updatedMsg = await db.getMessageById(messageId);
+            if (updatedMsg && updatedMsg.modelResponses[modelKey]) {
+              updatedMsg.modelResponses[modelKey].content = fullContent;
+              updatedMsg.modelResponses[modelKey].status = 'stopped';
+              updatedMsg.modelResponses[modelKey].durationMs = durationMs;
+              await db.updateMessage(messageId, updatedMsg);
+            }
+
+            io.to(roomName).emit('model-stream-stopped', {
+              messageId,
+              modelKey,
+              content: fullContent,
+              durationMs
+            });
+            io.to(roomName).emit('ai-stream-end', {
+              messageId,
+              modelKey,
+              content: fullContent,
+              durationMs,
+              status: 'stopped'
+            });
+          };
+
           const onCompleteCallback = async (finalText: string) => {
+            if (generation.stopped) {
+              await completeStopped();
+              return;
+            }
             const durationMs = Date.now() - startTime;
             
             // Save final rendering inside persistent DB
@@ -343,6 +387,12 @@ export function setupSocketIO(server: HttpServer) {
           };
 
           const onErrorCallback = async (err: string) => {
+            // An aborted stream is a user stop, not a failure.
+            if (generation.stopped) {
+              await completeStopped();
+              return;
+            }
+            console.error(`[socket] stream failed for model ${modelKey}: ${err}`);
             const updatedMsg = await db.getMessageById(messageId);
             if (updatedMsg && updatedMsg.modelResponses[modelKey]) {
               updatedMsg.modelResponses[modelKey].status = 'failed';
@@ -364,8 +414,14 @@ export function setupSocketIO(server: HttpServer) {
             });
           };
 
-          // Route to centralized AI providers; transport is resolved from the registry
-          await streamModel(modelKey, promptText, onChunkCallback, onCompleteCallback, onErrorCallback);
+          // Route to centralized AI providers; transport is resolved from the registry.
+          // The abort controller lets the client stop this model mid-stream.
+          try {
+            await streamModel(modelKey, promptText, onChunkCallback, onCompleteCallback, onErrorCallback, controller.signal);
+          } finally {
+            const current = activeGenerations.get(generationKey);
+            if (current === generation) activeGenerations.delete(generationKey);
+          }
         } catch (err: any) {
           console.error(`Socket query loop failure on model ${modelKey}:`, err);
           io.to(roomName).emit('model-stream-failed', {
@@ -375,6 +431,30 @@ export function setupSocketIO(server: HttpServer) {
           });
         }
       });
+    });
+
+    // -- MANUAL STOP OF AN ACTIVE GENERATION --
+    socket.on('stop-generation', (data: { messageId: string; modelKey?: string }) => {
+      const { messageId, modelKey } = data || {};
+      if (!messageId) return;
+
+      const prefix = `${messageId}:`;
+      let stopped = 0;
+
+      for (const [key, generation] of Array.from(activeGenerations.entries())) {
+        if (!key.startsWith(prefix)) continue;
+        if (modelKey && key !== `${messageId}:${modelKey}`) continue;
+        generation.stopped = true;
+        generation.controller.abort();
+        stopped++;
+      }
+
+      if (stopped === 0) {
+        socket.emit('error-alert', { message: 'That stream has already finished.' });
+        return;
+      }
+
+      console.log(`[socket] stop requested for ${stopped} active stream(s) on message ${messageId}`);
     });
 
     // -- DISCONNECT ROUTINES --

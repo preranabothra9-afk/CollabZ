@@ -59,6 +59,8 @@ export default function AuthPortal() {
   const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
   const [resendState, setResendState] = useState<'idle' | 'working' | 'sent'>('idle');
   const [devVerifyUrl, setDevVerifyUrl] = useState<string | null>(null);
+  // Distinguishes "dev mode" from "mail delivery really failed" in the fallback panel.
+  const [mailFailed, setMailFailed] = useState(false);
 
   // Restore "remember me" email on mount
   useEffect(() => {
@@ -109,6 +111,7 @@ export default function AuthPortal() {
     if (result.success) {
       setResendState('sent');
       setDevVerifyUrl(result.verificationUrl || null);
+      setMailFailed(!!result.mailFailed);
     } else {
       setResendState('idle');
       setVerifyMessage(result.message);
@@ -195,6 +198,7 @@ export default function AuthPortal() {
         // Signup no longer returns a session -- send them to the "check your inbox" state
         if (ok) {
           setDevVerifyUrl(pendingVerificationUrl || null);
+          setMailFailed(true);
           switchView('verify');
         }
       } else {
@@ -532,8 +536,15 @@ export default function AuthPortal() {
             {devVerifyUrl && verifyState !== 'success' && (
               <div className="mt-4 bg-ember/5 border border-ember/20 rounded-lg p-3">
                 <p className="text-[13px] font-mono font-bold uppercase tracking-wider text-ember-soft mb-2">
-                  Dev mode &mdash; SMTP not configured
+                  {mailFailed
+                    ? 'Email delivery failed — manual verification link'
+                    : 'Dev mode — SMTP not configured'}
                 </p>
+                {mailFailed && (
+                  <p className="text-[12px] text-faint mb-2 leading-relaxed">
+                    The mail server could not be reached, so the link was not emailed. Use it below to activate your account now.
+                  </p>
+                )}
                 <p className="text-[13px] text-faint mb-2 break-all">{devVerifyUrl}</p>
                 <a
                   href={devVerifyUrl}

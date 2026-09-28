@@ -10,12 +10,29 @@ import AdminPanel from './AdminPanel';
 import ThemeSwitcher from './ThemeSwitcher';
 
 export default function Sidebar() {
-  const {
-    user, workspaces, activeWorkspace, createWorkspace, deleteWorkspace, setActiveWorkspace,
-    conversations, activeConversation, setActiveConversation, createConversation, deleteConversation,
-    presence, socketConnected, isSidebarOpen, setSidebarOpen,
-    isSavedResponsesOpen, setSavedResponsesOpen, isAdminPanelOpen, setAdminPanelOpen, logout, navigateTo,
-  } = useStore();
+  // Fine-grained selectors: this sidebar re-renders per stream chunk otherwise,
+  // because the store swaps `messages` on every token a model emits.
+  const user = useStore((s) => s.user);
+  const workspaces = useStore((s) => s.workspaces);
+  const activeWorkspace = useStore((s) => s.activeWorkspace);
+  const createWorkspace = useStore((s) => s.createWorkspace);
+  const deleteWorkspace = useStore((s) => s.deleteWorkspace);
+  const setActiveWorkspace = useStore((s) => s.setActiveWorkspace);
+  const conversations = useStore((s) => s.conversations);
+  const activeConversation = useStore((s) => s.activeConversation);
+  const setActiveConversation = useStore((s) => s.setActiveConversation);
+  const createConversation = useStore((s) => s.createConversation);
+  const deleteConversation = useStore((s) => s.deleteConversation);
+  const presence = useStore((s) => s.presence);
+  const socketConnected = useStore((s) => s.socketConnected);
+  const isSidebarOpen = useStore((s) => s.isSidebarOpen);
+  const setSidebarOpen = useStore((s) => s.setSidebarOpen);
+  const isSavedResponsesOpen = useStore((s) => s.isSavedResponsesOpen);
+  const setSavedResponsesOpen = useStore((s) => s.setSavedResponsesOpen);
+  const isAdminPanelOpen = useStore((s) => s.isAdminPanelOpen);
+  const setAdminPanelOpen = useStore((s) => s.setAdminPanelOpen);
+  const logout = useStore((s) => s.logout);
+  const navigateTo = useStore((s) => s.navigateTo);
 
   const collapsed = !isSidebarOpen;
   const [isWsMenuOpen, setIsWsMenuOpen] = useState(false);

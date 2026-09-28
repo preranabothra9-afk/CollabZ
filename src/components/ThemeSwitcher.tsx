@@ -25,7 +25,8 @@ interface Props {
  * clipped by an `overflow-hidden` parent such as the collapsed sidebar rail.
  */
 export default function ThemeSwitcher({ variant = 'icon', className = '' }: Props) {
-  const { theme, setTheme } = useStore();
+  const theme = useStore((s) => s.theme);
+  const setTheme = useStore((s) => s.setTheme);
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });

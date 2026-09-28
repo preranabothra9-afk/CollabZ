@@ -3,7 +3,16 @@ import { useStore } from '../store';
 import { Send, CheckSquare, Square, Eye, Users, Zap } from 'lucide-react';
 
 export default function PromptBox() {
-  const { collaborativePromptText, sendPromptTextChange, sendTypingStatus, submitPrompt, selectedModels, toggleModel, whoIsEditing } = useStore();
+  // Fine-grained selectors: this component otherwise re-renders on every
+  // streaming chunk (the store swaps `messages` per token) and the textarea
+  // starts dropping keystrokes while a model is generating.
+  const collaborativePromptText = useStore((s) => s.collaborativePromptText);
+  const sendPromptTextChange = useStore((s) => s.sendPromptTextChange);
+  const sendTypingStatus = useStore((s) => s.sendTypingStatus);
+  const submitPrompt = useStore((s) => s.submitPrompt);
+  const selectedModels = useStore((s) => s.selectedModels);
+  const toggleModel = useStore((s) => s.toggleModel);
+  const whoIsEditing = useStore((s) => s.whoIsEditing);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -32,7 +41,7 @@ export default function PromptBox() {
   // all available on a genuine free tier. Llama is listed last because Groq
   // gates it behind a paid plan.
   const models = [
-    { key: 'gemini-3.5-flash', label: 'Gemini 3.5', activeColor: 'bg-blue-500/10 text-cat-blue border-blue-500/25' },
+    { key: 'gemini-2.5-flash', label: 'Gemini 2.5', activeColor: 'bg-blue-500/10 text-cat-blue border-blue-500/25' },
     { key: 'gpt-oss-120b', label: 'GPT-OSS 120B', activeColor: 'bg-emerald-500/10 text-leaf border-emerald-500/25' },
     { key: 'qwen3.8-27b', label: 'Qwen3.8 27B', activeColor: 'bg-violet-500/10 text-cat-violet border-violet-500/25' },
     { key: 'gpt-oss-20b', label: 'GPT-OSS 20B', activeColor: 'bg-amber-500/10 text-warn border-amber-500/25' },

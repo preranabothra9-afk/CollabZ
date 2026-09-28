@@ -23,17 +23,17 @@ import AdminSettings from './admin/pages/AdminSettings';
 import { BrandLoader, usePageTitle, BRAND } from './brand';
 
 export default function App() {
-  const { 
-    user, 
-    isAuthenticating, 
-    init, 
-    currentPath,
-    navigateTo,
-    setCurrentPath,
-    activeWorkspace,
-    isSavedResponsesOpen,
-    setSavedResponsesOpen
-  } = useStore();
+  // Fine-grained selectors so the shell doesn't re-render on every stream
+  // chunk (the store swaps `messages` per token while a model is generating).
+  const user = useStore((s) => s.user);
+  const isAuthenticating = useStore((s) => s.isAuthenticating);
+  const init = useStore((s) => s.init);
+  const currentPath = useStore((s) => s.currentPath);
+  const navigateTo = useStore((s) => s.navigateTo);
+  const setCurrentPath = useStore((s) => s.setCurrentPath);
+  const activeWorkspace = useStore((s) => s.activeWorkspace);
+  const isSavedResponsesOpen = useStore((s) => s.isSavedResponsesOpen);
+  const setSavedResponsesOpen = useStore((s) => s.setSavedResponsesOpen);
 
   // Dynamic page title based on current route
   usePageTitle(

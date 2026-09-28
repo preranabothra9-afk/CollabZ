@@ -6,7 +6,7 @@ import os from 'os';
 import { db } from './database';
 import { User } from '../src/types';
 import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from './validators';
-import { sendVerificationEmail, isMailConfigured } from './mailer';
+import { sendVerificationEmail, sendPasswordResetEmail, isMailConfigured } from './mailer';
 
 // Helpers to get cryptographic keys
 export function getJwtSecret(): string {
@@ -64,10 +64,26 @@ export function generateRefreshToken(user: User): string {
 }
 
 // Cookie configuration for high security HttpOnly Refresh Token
+// `secure` must track the request scheme: a `Secure` cookie is discarded by
+// browsers on plain HTTP, which would drop the refresh token on every localhost
+// reload and force a re-login. `req.protocol` reflects the real scheme because
+// Express is configured with `trust proxy` upstream.
+export function getRefreshCookieOptions(req?: Request) {
+  const isSecure = req ? req.protocol === 'https' : process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isSecure,
+    // 'none' is only valid with Secure; fall back to 'lax' on HTTP origins.
+    sameSite: (isSecure ? 'none' : 'lax') as 'none' | 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+  };
+}
+
+/** Legacy constant kept for the clearCookie paths that don't have a request. */
 export const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: true, // Always true to support safe Secure cookie handling inside iframes
-  sameSite: 'none' as const, // Required for cross-origin iframe embedding in AI Studio preview
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
 };
 
@@ -195,8 +211,13 @@ export async function handleRegister(req: Request, res: Response) {
         avatar: userObj.avatar,
         role: userObj.role,
       },
-      // Surfaced in development so the flow is testable without a mail server
-      ...(process.env.NODE_ENV !== 'production' ? { verificationUrl, dev: true } : {}),
+      // Surfaced in development so the flow is testable without a mail server.
+      // Also surfaced when mail delivery actually failed — otherwise a broken
+      // SMTP server locks newly registered users out of their unverified
+      // accounts with no way to obtain the link.
+      ...(process.env.NODE_ENV !== 'production' || !emailed
+        ? { verificationUrl, dev: process.env.NODE_ENV !== 'production', mailFailed: !emailed }
+        : {}),
     });
   } catch (e: any) {
     console.error('Registration error:', e);
@@ -263,7 +284,7 @@ export async function handleLogin(req: Request, res: Response) {
     await UserModel.findByIdAndUpdate(user.id, { refreshToken }).catch(() => {});
 
     // Set refresh token in HttpOnly Cookie
-    res.cookie('refreshToken', refreshToken, REFRESH_COOKIE_OPTIONS);
+    res.cookie('refreshToken', refreshToken, getRefreshCookieOptions(req));
 
     // Write audit log entry for login
     await db.logAudit(user.id, user.name, user.email, 'LOGIN', 'Authenticated session established successfully.', undefined, req.ip);
@@ -321,11 +342,7 @@ export async function handleRefresh(req: Request, res: Response) {
         userDoc.refreshToken = null;
         await userDoc.save();
       }
-      res.clearCookie('refreshToken', {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'none' as const,
-      });
+      res.clearCookie('refreshToken', getRefreshCookieOptions(req));
       return res.status(401).json({ error: 'Session revoked due to token conflict. Please authenticate again.' });
     }
 
@@ -337,7 +354,7 @@ export async function handleRefresh(req: Request, res: Response) {
     await userDoc.save();
 
     // Re-set updated cookie
-    res.cookie('refreshToken', nextRefreshToken, REFRESH_COOKIE_OPTIONS);
+    res.cookie('refreshToken', nextRefreshToken, getRefreshCookieOptions(req));
 
     return res.status(200).json({
       message: 'Token renewed successfully',
@@ -368,11 +385,7 @@ export async function handleLogout(req: Request, res: Response) {
     console.warn('Logout database record traces exception:', err);
   }
 
-  res.clearCookie('refreshToken', {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none' as const,
-  });
+  res.clearCookie('refreshToken', getRefreshCookieOptions(req));
   return res.status(200).json({ message: 'Logged out successfully' });
 }
 
@@ -430,10 +443,27 @@ export async function handleForgotPassword(req: Request, res: Response) {
     const origin = (req.headers.origin || req.protocol + '://' + req.get('host')) as string;
     const resetUrl = `${origin}/reset-password?token=${rawToken}`;
 
+    // Actually deliver the link. Without this the token was minted and stored
+    // but never emailed, so the reset flow only worked in dev mode.
+    const emailed = await sendPasswordResetEmail({
+      to: user.email,
+      name: user.name,
+      resetUrl,
+    });
+
+    if (!emailed) {
+      console.warn(`⚠️ Password reset email not sent (SMTP ${isMailConfigured() ? 'send failed' : 'unconfigured'}). Link: ${resetUrl}`);
+    }
+
     const isDevelopment = process.env.NODE_ENV !== 'production';
     return res.status(200).json({
       message: genericMessage,
-      ...(isDevelopment ? { resetUrl, dev: true } : {}),
+      // Dev surfaces it directly; production surfaces it only when mail
+      // delivery actually failed, so a broken SMTP server can't dead-end the
+      // user with no way to reach the reset form.
+      ...(isDevelopment || !emailed
+        ? { resetUrl, dev: isDevelopment, mailFailed: !emailed }
+        : {}),
     });
   } catch (e: any) {
     console.error('Forgot password error:', e);
@@ -684,7 +714,9 @@ export async function handleResendVerification(req: Request, res: Response) {
       success: true,
       message: genericMessage,
       emailSent: emailed,
-      ...(process.env.NODE_ENV !== 'production' ? { verificationUrl, dev: true } : {}),
+      ...(process.env.NODE_ENV !== 'production' || !emailed
+        ? { verificationUrl, dev: process.env.NODE_ENV !== 'production', mailFailed: !emailed }
+        : {}),
     });
   } catch (e: any) {
     console.error('Resend verification error:', e);

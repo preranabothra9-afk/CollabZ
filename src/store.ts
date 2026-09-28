@@ -2,6 +2,16 @@ import { create } from 'zustand';
 import { io } from 'socket.io-client';
 import { User, Workspace, Conversation, Message, SavedResponse } from './types';
 
+/** Compact search hit returned by the room history search endpoint. */
+export interface SearchResult {
+  id: string;
+  promptText: string;
+  createdAt: string;
+  senderName: string;
+  matchedIn: string;
+  snippet: string;
+}
+
 // Import our modular stores to compose the hub
 import { useAuthStore } from './stores/authStore';
 import { useWorkspaceStore } from './stores/workspaceStore';
@@ -23,8 +33,11 @@ export interface AppState {
   conversations: Conversation[];
   activeConversation: Conversation | null;
   messages: Message[];
+  hasMoreMessages: boolean;
+  isLoadingOlder: boolean;
+  highlightMessageId: string | null;
+  setHighlightMessageId: (id: string | null) => void;
   savedResponses: SavedResponse[];
-
   // Real-time Presence
   presence: any[];
   collaborativePromptText: string;
@@ -60,7 +73,7 @@ export interface AppState {
   pendingVerificationUrl: string | null;
   setPendingVerification: (email: string | null, url?: string | null) => void;
   verifyEmail: (token: string) => Promise<{ success: boolean; message: string; code?: string }>;
-  resendVerification: (email: string) => Promise<{ success: boolean; message: string; verificationUrl?: string }>;
+  resendVerification: (email: string) => Promise<{ success: boolean; message: string; verificationUrl?: string; mailFailed?: boolean }>;
 
   // Workspace Actions
   fetchWorkspaces: (options?: { autoEnter?: boolean }) => Promise<void>;
@@ -76,7 +89,15 @@ export interface AppState {
 
   // Messages Actions
   fetchMessages: (conversationId: string) => Promise<void>;
+  /** Pages further back into a room's history and prepends the older slice. */
+  loadOlderMessages: () => Promise<void>;
+  /** Searches a room's prompts + model responses. */
+  searchHistory: (conversationId: string, query: string) => Promise<SearchResult[]>;
+  /** Scrolls the feed to a message, paging history in if it isn't loaded yet. */
+  jumpToMessage: (messageId: string, createdAt: string) => Promise<void>;
   submitPrompt: (promptText: string) => void;
+  /** Stops one active model stream, or every stream of a message when modelKey is omitted. */
+  stopGeneration: (messageId: string, modelKey?: string) => void;
 
   // Saved AI responses
   fetchSavedResponses: (workspaceId: string) => Promise<void>;
@@ -326,6 +347,28 @@ export const useStore = create<AppState>((set, get) => {
       });
     });
 
+    socket.on('model-stream-stopped', (data: { messageId: string; modelKey: string; content: string; durationMs: number }) => {
+      useChatStore.setState({
+        messages: useChatStore.getState().messages.map(m => {
+          if (m.id === data.messageId && m.modelResponses[data.modelKey]) {
+            return {
+              ...m,
+              modelResponses: {
+                ...m.modelResponses,
+                [data.modelKey]: {
+                  ...m.modelResponses[data.modelKey],
+                  content: data.content,
+                  status: 'stopped' as const,
+                  durationMs: data.durationMs
+                }
+              }
+            };
+          }
+          return m;
+        })
+      });
+    });
+
     socket.on('model-stream-failed', (data: { messageId: string; modelKey: string; error: string }) => {
       useChatStore.setState({
         messages: useChatStore.getState().messages.map(m => {
@@ -363,6 +406,9 @@ export const useStore = create<AppState>((set, get) => {
     conversations: useChatStore.getState().conversations,
     activeConversation: useChatStore.getState().activeConversation,
     messages: useChatStore.getState().messages,
+    hasMoreMessages: useChatStore.getState().hasMoreMessages,
+    isLoadingOlder: useChatStore.getState().isLoadingOlder,
+    highlightMessageId: useChatStore.getState().highlightMessageId,
     savedResponses: useChatStore.getState().savedResponses,
     presence: useChatStore.getState().presence,
     collaborativePromptText: useChatStore.getState().collaborativePromptText,
@@ -493,6 +539,8 @@ export const useStore = create<AppState>((set, get) => {
 
     clearAuthError: () => useAuthStore.setState({ authError: null }),
 
+    setHighlightMessageId: (id) => useChatStore.getState().setHighlightMessageId(id),
+
     // ── Password recovery actions ────────────────────────────────────
     requestPasswordReset: async (email) => {
       try {
@@ -568,6 +616,7 @@ export const useStore = create<AppState>((set, get) => {
             success: true,
             message: data.message || 'If the account exists, a new link has been sent.',
             verificationUrl: data.verificationUrl,
+            mailFailed: !!data.mailFailed,
           };
         }
         return { success: false, message: data.error || 'Could not send verification email.' };
@@ -710,7 +759,7 @@ export const useStore = create<AppState>((set, get) => {
           if (nextActive?.id === id) {
             nextActive = filtered.length > 0 ? filtered[0] : null;
           }
-          useChatStore.setState({ conversations: filtered, activeConversation: nextActive });
+          useChatStore.setState({ conversations: filtered, activeConversation: nextActive, hasMoreMessages: false });
 
           if (nextActive) {
             get().fetchMessages(nextActive.id);
@@ -724,7 +773,7 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     setActiveConversation: (conv) => {
-      useChatStore.setState({ activeConversation: conv, messages: [] });
+      useChatStore.setState({ activeConversation: conv, messages: [], hasMoreMessages: false, highlightMessageId: null });
       if (conv) {
         get().fetchMessages(conv.id);
       }
@@ -734,12 +783,97 @@ export const useStore = create<AppState>((set, get) => {
       try {
         const res = await secureFetch(`${API_BASE}/messages/${conversationId}`);
         if (res.ok) {
-          const history: Message[] = await res.json();
-          useChatStore.setState({ messages: history });
+          const data = await res.json();
+          useChatStore.setState({
+            messages: data.messages ?? [],
+            hasMoreMessages: !!data.hasMore,
+          });
         }
       } catch (err) {
         console.error('Error fetching chat history:', err);
       }
+    },
+
+    loadOlderMessages: async () => {
+      const conv = useChatStore.getState().activeConversation;
+      const current = useChatStore.getState().messages;
+      if (!conv || current.length === 0 || useChatStore.getState().isLoadingOlder) return;
+
+      const oldest = current[0];
+      useChatStore.setState({ isLoadingOlder: true });
+      try {
+        const params = new URLSearchParams({
+          before: oldest.createdAt,
+          beforeId: oldest.id,
+        });
+        const res = await secureFetch(`${API_BASE}/messages/${conv.id}?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          const older: Message[] = data.messages ?? [];
+          useChatStore.setState((state) => ({
+            // Prepend the older slice — the API already returns it chronologically
+            messages: [...older, ...state.messages],
+            hasMoreMessages: !!data.hasMore,
+          }));
+        }
+      } catch (err) {
+        console.error('Error loading older messages:', err);
+      } finally {
+        useChatStore.setState({ isLoadingOlder: false });
+      }
+    },
+
+    searchHistory: async (conversationId, query) => {
+      try {
+        const params = new URLSearchParams({ q: query });
+        const res = await secureFetch(`${API_BASE}/messages/${conversationId}/search?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          return (data.results ?? []) as SearchResult[];
+        }
+      } catch (err) {
+        console.error('Error searching history:', err);
+      }
+      return [];
+    },
+
+    jumpToMessage: async (messageId, createdAt) => {
+      const conv = useChatStore.getState().activeConversation;
+      if (!conv) return;
+
+      // If the message is already loaded, just scroll to it.
+      if (useChatStore.getState().messages.some((m) => m.id === messageId)) {
+        useChatStore.setState({ highlightMessageId: messageId });
+        return;
+      }
+
+      // Otherwise page backwards until it appears (bounded — no runaway loops).
+      let guard = 0;
+      while (
+        !useChatStore.getState().messages.some((m) => m.id === messageId) &&
+        useChatStore.getState().hasMoreMessages &&
+        guard++ < 20
+      ) {
+        const current = useChatStore.getState().messages;
+        const oldest = current[0];
+        try {
+          const params = new URLSearchParams({ before: oldest.createdAt, beforeId: oldest.id });
+          const res = await secureFetch(`${API_BASE}/messages/${conv.id}?${params.toString()}`);
+          if (!res.ok) break;
+          const data = await res.json();
+          const older: Message[] = data.messages ?? [];
+          if (older.length === 0) break;
+          useChatStore.setState((state) => ({
+            messages: [...older, ...state.messages],
+            hasMoreMessages: !!data.hasMore,
+          }));
+        } catch (err) {
+          console.error('Error paging to message:', err);
+          break;
+        }
+      }
+
+      useChatStore.setState({ highlightMessageId: messageId });
     },
 
     submitPrompt: (promptText) => {
@@ -770,6 +904,12 @@ export const useStore = create<AppState>((set, get) => {
         userId: user.id,
         userName: user.name
       });
+    },
+
+    stopGeneration: (messageId, modelKey) => {
+      const socket = useSocketStore.getState().socket;
+      if (!socket || !messageId) return;
+      socket.emit('stop-generation', { messageId, modelKey });
     },
 
     fetchSavedResponses: async (workspaceId) => {
@@ -892,6 +1032,9 @@ useChatStore.subscribe((state) => {
     conversations: state.conversations,
     activeConversation: state.activeConversation,
     messages: state.messages,
+    hasMoreMessages: state.hasMoreMessages,
+    isLoadingOlder: state.isLoadingOlder,
+    highlightMessageId: state.highlightMessageId,
     savedResponses: state.savedResponses,
     presence: state.presence,
     collaborativePromptText: state.collaborativePromptText,
