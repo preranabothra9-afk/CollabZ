@@ -224,9 +224,9 @@ async function seedDefaultMongoData() {
             status: 'completed',
             durationMs: 420
           },
-          'claude-3-5': {
-            modelName: 'Claude 3.5 Sonnet (Simulated)',
-            content: 'CollabZ operates as a real-time full-stack environment. It enables multi-model cross-examination under high stress, where multiple collaborative nodes query distinct intelligent agents simultaneously.',
+          'gpt-oss-120b': {
+            modelName: 'GPT-OSS 120B',
+            content: 'CollabZ operates as a real-time full-stack environment. It enables multi-model cross-examination where multiple collaborators query distinct intelligent agents simultaneously.',
             status: 'completed',
             durationMs: 780
           }

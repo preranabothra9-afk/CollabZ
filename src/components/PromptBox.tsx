@@ -28,10 +28,17 @@ export default function PromptBox() {
 
   useEffect(() => { return () => { if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current); }; }, []);
 
+  // First three are the default comparison set: Google, OpenAI and Alibaba labs,
+  // all available on a genuine free tier. Llama is listed last because Groq
+  // gates it behind a paid plan.
   const models = [
     { key: 'gemini-3.5-flash', label: 'Gemini 3.5', activeColor: 'bg-blue-500/10 text-cat-blue border-blue-500/25' },
-    { key: 'claude-3-5', label: 'Claude 3.5', activeColor: 'bg-amber-500/10 text-warn border-amber-500/25' },
-    { key: 'gpt-4o', label: 'GPT-4o', activeColor: 'bg-emerald-500/10 text-leaf border-emerald-500/25' },
+    { key: 'gpt-oss-120b', label: 'GPT-OSS 120B', activeColor: 'bg-emerald-500/10 text-leaf border-emerald-500/25' },
+    { key: 'qwen3.8-27b', label: 'Qwen3.8 27B', activeColor: 'bg-violet-500/10 text-cat-violet border-violet-500/25' },
+    { key: 'gpt-oss-20b', label: 'GPT-OSS 20B', activeColor: 'bg-amber-500/10 text-warn border-amber-500/25' },
+    { key: 'mistral-small', label: 'Mistral Small', activeColor: 'bg-sky-500/10 text-cat-indigo border-sky-500/25' },
+    { key: 'deepseek-r1', label: 'DeepSeek R1', activeColor: 'bg-rose-500/10 text-rust border-rose-500/25' },
+    { key: 'llama-3.3-70b', label: 'Llama 3.3 70B (paid)', activeColor: 'bg-amber-500/10 text-warn border-amber-500/25' },
   ];
 
   return (

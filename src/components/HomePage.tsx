@@ -386,7 +386,7 @@ export default function HomePage() {
 /* ── Data ────────────────────────────────────────────────────────────── */
 
 const MARQUEE = [
-  'Gemini 3.5 Flash', 'Claude 3.5 Sonnet', 'GPT-4o', 'Parallel streaming',
+  'Gemini 3.5 Flash', 'GPT-OSS 120B', 'Qwen3.8 27B', 'Parallel streaming',
   'Side-by-side diff', 'Live presence', 'Pinned insights', 'Audit logs',
 ];
 
@@ -622,11 +622,11 @@ const MOCK_MODELS = [
     lines: [94, 70, 86, 58], quality: 78, live: false,
   },
   {
-    name: 'Claude 3.5 Sonnet', dot: 'bg-leaf', status: 'BEST', statusCls: 'text-leaf',
+    name: 'GPT-OSS 120B', dot: 'bg-leaf', status: 'BEST', statusCls: 'text-leaf',
     lines: [88, 96, 74, 82, 64], quality: 94, live: false, winner: true,
   },
   {
-    name: 'GPT-4o', dot: 'bg-rust animate-pulse', status: 'LIVE', statusCls: 'text-rust',
+    name: 'Qwen3.8 27B', dot: 'bg-rust animate-pulse', status: 'LIVE', statusCls: 'text-rust',
     lines: [80, 66, 54], quality: 41, live: true,
   },
 ];

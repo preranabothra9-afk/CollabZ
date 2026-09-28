@@ -1,11 +1,43 @@
 import { GoogleGenAI } from '@google/genai';
 
 // Centralized AI Model Providers Registry
+//
+// Every entry below is a real, callable provider. Credentials are read from
+// server-side environment variables only and are never exposed to the client.
+//
+// Note on model choice: OpenAI and Anthropic do not offer any no-cost API
+// access, so this registry deliberately uses open-weight models (Llama, GPT-OSS,
+// Qwen, DeepSeek, Mistral) that are served on genuinely free provider tiers.
+// GPT-OSS is OpenAI's own open-weight release, which keeps an OpenAI-labelled
+// model in the comparison without requiring a paid OpenAI key.
+
+export type AIProvider = 'google' | 'groq' | 'mistral' | 'nvidia';
+export type AITransport = 'google-sdk' | 'openai-compat';
+export type AIModelStatus = 'active' | 'coming-soon';
+
 export interface AIModelConfig {
   id: string;
   name: string;
-  provider: 'google' | 'openai' | 'anthropic';
-  status: 'active' | 'coming-soon';
+  provider: AIProvider;
+  /** Organisation that trained the model, which may differ from the host. */
+  lab: string;
+  transport: AITransport;
+  /** Model identifier expected by the upstream provider (may differ from `id`). */
+  upstreamModel: string;
+  /** Environment variable holding the credential. Server-side only. */
+  apiKeyEnv: string;
+  /** Where a developer can create a free credential. */
+  signupUrl: string;
+  /** Human readable summary of the free allowance. */
+  freeTier: string;
+  /** Optional OpenAI-compatible base URL override. */
+  baseUrl?: string;
+  /** Omitted from the request body when undefined, for provider compatibility. */
+  temperature?: number;
+  maxTokens?: number;
+  /** True when the upstream provider gates this model behind a paid plan. */
+  requiresPaidPlan?: boolean;
+  status: AIModelStatus;
 }
 
 export const AI_MODELS: Record<string, AIModelConfig> = {
@@ -13,21 +45,145 @@ export const AI_MODELS: Record<string, AIModelConfig> = {
     id: 'gemini-3.5-flash',
     name: 'Gemini 3.5 Flash',
     provider: 'google',
+    lab: 'Google',
+    transport: 'google-sdk',
+    upstreamModel: 'gemini-3.5-flash',
+    apiKeyEnv: 'GEMINI_API_KEY',
+    signupUrl: 'https://aistudio.google.com/apikey',
+    freeTier: 'Free tier, no credit card',
+    maxTokens: 4096,
     status: 'active'
   },
-  'gpt-4o': {
-    id: 'gpt-4o',
-    name: 'GPT-4o Workspace',
-    provider: 'openai',
-    status: 'coming-soon'
+  'gpt-oss-120b': {
+    id: 'gpt-oss-120b',
+    name: 'GPT-OSS 120B',
+    provider: 'groq',
+    lab: 'OpenAI',
+    transport: 'openai-compat',
+    upstreamModel: 'openai/gpt-oss-120b',
+    apiKeyEnv: 'GROQ_API_KEY',
+    signupUrl: 'https://console.groq.com/keys',
+    freeTier: 'Free plan - 30 RPM, 1000 req/day',
+    maxTokens: 2048,
+    status: 'active'
   },
-  'claude-3-5': {
-    id: 'claude-3-5',
-    name: 'Claude 3.5 Sonnet',
-    provider: 'anthropic',
-    status: 'coming-soon'
+  'qwen3.8-27b': {
+    id: 'qwen3.8-27b',
+    name: 'Qwen3.8 27B',
+    provider: 'groq',
+    lab: 'Alibaba',
+    transport: 'openai-compat',
+    upstreamModel: 'qwen/qwen3.8-27b',
+    apiKeyEnv: 'GROQ_API_KEY',
+    signupUrl: 'https://console.groq.com/keys',
+    freeTier: 'Free plan - 30 RPM, 1000 req/day',
+    maxTokens: 2048,
+    status: 'active'
+  },
+  'gpt-oss-20b': {
+    id: 'gpt-oss-20b',
+    name: 'GPT-OSS 20B',
+    provider: 'groq',
+    lab: 'OpenAI',
+    transport: 'openai-compat',
+    upstreamModel: 'openai/gpt-oss-20b',
+    apiKeyEnv: 'GROQ_API_KEY',
+    signupUrl: 'https://console.groq.com/keys',
+    freeTier: 'Free plan - 30 RPM, 1000 req/day',
+    maxTokens: 2048,
+    status: 'active'
+  },
+  'llama-3.3-70b': {
+    id: 'llama-3.3-70b',
+    name: 'Llama 3.3 70B',
+    provider: 'groq',
+    lab: 'Meta',
+    transport: 'openai-compat',
+    upstreamModel: 'llama-3.3-70b-versatile',
+    apiKeyEnv: 'GROQ_API_KEY',
+    signupUrl: 'https://console.groq.com/keys',
+    freeTier: 'Requires a paid Groq plan - not in the free tier',
+    requiresPaidPlan: true,
+    temperature: 0.7,
+    maxTokens: 2048,
+    status: 'active'
+  },
+  'mistral-small': {
+    id: 'mistral-small',
+    name: 'Mistral Small',
+    provider: 'mistral',
+    lab: 'Mistral',
+    transport: 'openai-compat',
+    upstreamModel: 'mistral-small-latest',
+    apiKeyEnv: 'MISTRAL_API_KEY',
+    signupUrl: 'https://console.mistral.ai/api-keys/',
+    freeTier: 'Free Experiment tier, no credit card',
+    temperature: 0.7,
+    maxTokens: 2048,
+    status: 'active'
+  },
+  'deepseek-r1': {
+    id: 'deepseek-r1',
+    name: 'DeepSeek R1',
+    provider: 'nvidia',
+    lab: 'DeepSeek',
+    transport: 'openai-compat',
+    upstreamModel: 'deepseek-ai/deepseek-r1',
+    apiKeyEnv: 'NVIDIA_API_KEY',
+    signupUrl: 'https://build.nvidia.com',
+    freeTier: 'Free developer tier, 40 RPM',
+    maxTokens: 2048,
+    status: 'active'
   }
 };
+
+/**
+ * The three models selected by default for comparative prompts: three different
+ * labs, all reachable on a genuine no-cost tier with only two signups
+ * (Google AI Studio + Groq).
+ */
+export const DEFAULT_COMPARISON_MODELS = ['gemini-3.5-flash', 'gpt-oss-120b', 'qwen3.8-27b'];
+
+const OPENAI_COMPAT_BASE_URLS: Record<Exclude<AIProvider, 'google'>, string> = {
+  groq: 'https://api.groq.com/openai/v1',
+  mistral: 'https://api.mistral.ai/v1',
+  nvidia: 'https://integrate.api.nvidia.com/v1'
+};
+
+/** True when the model's credential is present in the server environment. */
+export function isModelConfigured(modelId: string): boolean {
+  const config = AI_MODELS[modelId];
+  if (!config) return false;
+  return Boolean(process.env[config.apiKeyEnv]?.trim());
+}
+
+/**
+ * Builds an actionable notice for a model whose credential is missing, naming
+ * the exact variable and where to obtain a free key. `fallback` lets callers
+ * that hold a config object (for example a test or a dynamic route) still get
+ * an accurate notice for a key that is not in the static registry.
+ */
+export function buildCredentialNotice(modelId: string, fallback?: AIModelConfig): string {
+  const config = AI_MODELS[modelId] || fallback;
+  const name = config ? config.name : modelId;
+  const env = config ? config.apiKeyEnv : '(unknown)';
+  const url = config ? config.signupUrl : '';
+  const freeTier = config ? config.freeTier : '';
+
+  return `### ${name} - API key required
+
+This adapter is fully implemented, but no credential is loaded on the server.
+
+**Add this variable to the server \`.env\` file, then restart the server:**
+
+\`\`\`bash
+${env}=your_key_here
+\`\`\`
+${url ? `\n**Get a free key:** ${url}\n` : ''}
+**Free allowance:** ${freeTier || 'see provider documentation'}
+
+Keys are read on the server only and are never sent to the browser.`;
+}
 
 // Initialize the GoogleGenAI client with key from environment
 let aiClient: GoogleGenAI | null = null;
@@ -84,6 +240,162 @@ async function retryWithBackoff<T>(
   }
 }
 
+/** Abort a stalled upstream request rather than hanging a model card forever. */
+const STREAM_TIMEOUT_MS = 120_000;
+
+/** Extracts the most useful message from an OpenAI-compatible error payload. */
+function extractUpstreamError(body: string, status: number): string {
+  try {
+    const parsed = JSON.parse(body);
+    const message = parsed?.error?.message || parsed?.message;
+    if (message) return `${status}: ${message}`;
+  } catch {
+    // Non-JSON error body, fall through to the raw text.
+  }
+  const trimmed = body.trim();
+  return trimmed ? `${status}: ${trimmed.slice(0, 300)}` : `Upstream request failed with HTTP ${status}`;
+}
+
+/**
+ * Streams a chat completion from any OpenAI-compatible provider (Groq, Mistral,
+ * NVIDIA NIM) using the native fetch API, so no extra SDK dependency is needed.
+ *
+ * Handles both `text/event-stream` responses and providers that return a single
+ * non-streaming JSON body. Reasoning tokens (`delta.reasoning` /
+ * `delta.reasoning_content`, emitted by gpt-oss and DeepSeek R1) are discarded
+ * so only the final answer is shown.
+ */
+export async function streamOpenAICompatible(
+  config: AIModelConfig,
+  prompt: string,
+  onChunk: (text: string) => void,
+  onComplete: (fullText: string) => void,
+  onError: (errMessage: string) => void
+): Promise<void> {
+  const apiKey = process.env[config.apiKeyEnv]?.trim();
+  if (!apiKey) {
+    onError(buildCredentialNotice(config.id, config));
+    return;
+  }
+
+  const baseUrl = (config.baseUrl || OPENAI_COMPAT_BASE_URLS[config.provider as Exclude<AIProvider, 'google'>]).replace(/\/+$/, '');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+
+  try {
+    const body: Record<string, unknown> = {
+      model: config.upstreamModel,
+      messages: [{ role: 'user', content: prompt }],
+      stream: true
+    };
+    // Only send tuning fields the provider is known to accept.
+    if (config.temperature !== undefined) body.temperature = config.temperature;
+    if (config.maxTokens !== undefined) body.max_tokens = config.maxTokens;
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      onError(extractUpstreamError(errorBody, response.status));
+      return;
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+
+    // Some providers ignore `stream: true` and return one JSON payload.
+    if (contentType.includes('application/json') && !contentType.includes('event-stream')) {
+      const payload = await response.json().catch(() => null);
+      const text = payload?.choices?.[0]?.message?.content;
+      if (typeof text === 'string' && text) {
+        onChunk(text);
+        onComplete(text);
+      } else {
+        onError('Upstream provider returned a response without any content.');
+      }
+      return;
+    }
+
+    if (!response.body) {
+      onError('Upstream provider returned an empty response stream.');
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullText = '';
+    let received = false;
+    let finished = false;
+
+    const handlePayload = (payload: string): boolean => {
+      try {
+        const parsed = JSON.parse(payload);
+        const delta = parsed?.choices?.[0]?.delta;
+        const text = delta?.content;
+        if (typeof text === 'string' && text.length > 0) {
+          fullText += text;
+          received = true;
+          onChunk(text);
+        }
+        return false;
+      } catch {
+        // Ignore keep-alive comments and malformed frames.
+        return false;
+      }
+    };
+
+    while (!finished) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') {
+          finished = true;
+          break;
+        }
+        handlePayload(payload);
+      }
+    }
+
+    // Flush any trailing frame that arrived without a newline.
+    const tail = buffer.trim();
+    if (tail.startsWith('data:')) {
+      const payload = tail.slice(5).trim();
+      if (payload !== '[DONE]') handlePayload(payload);
+    }
+
+    if (!received && !fullText) {
+      onError('Upstream provider closed the stream without returning any content.');
+      return;
+    }
+
+    onComplete(fullText);
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      onError(`Request to ${config.name} timed out after ${STREAM_TIMEOUT_MS / 1000}s.`);
+      return;
+    }
+    onError(err?.message || String(err));
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /**
  * Intelligent local response generator when Google servers are completely offline or 503'ing
  */
@@ -122,7 +434,7 @@ export async function connectDB() {
 \`\`\`
 
 **Tips for fallback execution:**
-- Ensure your MongoDB connection string in **Settings > Secrets** is active.
+- Ensure \`MONGODB_URI\` is set in the server \`.env\` file and the server has been restarted.
 - If using Local MongoDB, check container configurations and standard bindings.`;
   }
   
@@ -174,7 +486,7 @@ I parsed your action request:
 **Offline Assistant Brainstorming & Feedback:**
 1. **Analysis**: Your inquiry is highly relevant for multi-agent comparative systems.
 2. **Next Steps**:
-   - Double check your environment variable bindings under the top-right **Settings > Secrets** panel.
+   - Check the server \`.env\` file contains the API keys for the models you selected, then restart the server.
    - If the capacity delay persists, wait a few seconds and send your prompt again.
    - If you need localized codebase changes, you can direct me precisely in our main workspace chat panel.
 
@@ -214,7 +526,7 @@ export function streamOfflineFallback(
 export async function getGeminiTextResponse(prompt: string): Promise<string> {
   const client = getGeminiClient();
   if (!client) {
-    return 'Gemini API not configured. Please add your GEMINI_API_KEY in Settings > Secrets.';
+    return 'Gemini API not configured. Add GEMINI_API_KEY to the server .env file and restart the server.';
   }
 
   const tryGenerate = async (modelName: string) => {
@@ -254,18 +566,10 @@ export async function streamRealGemini(
 ) {
   const client = getGeminiClient();
   if (!client) {
-    // Elegant fallback simulation detailing how to configure API keys
-    return streamSoonResponse(
+    // Explain exactly which variable is missing instead of faking a model answer.
+    return streamNotice(
       'gemini-3.5-flash',
-      `### 🛰️ Gemini 3.5 Flash
-The **GEMINI_API_KEY** environment variable resides in a pristine, unconfigured status.
-
-**How to connect your private credentials:**
-1. Navigate to the top-right **Settings / Secrets** drawer.
-2. Formulate a variable named exactly \`GEMINI_API_KEY\`.
-3. Paste your official key acquired from Google AI Studio.
-
-The platform will automatically inject variables and establish continuous secure tunnels. Let's design something wonderful.`,
+      buildCredentialNotice('gemini-3.5-flash'),
       onChunk,
       onComplete
     );
@@ -311,9 +615,10 @@ The platform will automatically inject variables and establish continuous secure
 }
 
 /**
- * Streams a professional "Coming Soon" notification for inactive models
+ * Streams a local status notice word-by-word. Used for unknown model keys and
+ * for models that still have no provider wired up.
  */
-export function streamSoonResponse(
+export function streamNotice(
   modelKey: string,
   customText: string | null,
   onChunk: (text: string) => void,
@@ -321,13 +626,12 @@ export function streamSoonResponse(
 ) {
   const modelConfig = AI_MODELS[modelKey];
   const modelName = modelConfig ? modelConfig.name : modelKey;
-  
-  const textToStream = customText || `### 📡 ${modelName} Integration
-> **STATUS: COMING SOON**
-> 
-> *Our engineering team is currently deploying safe, multi-agent evaluation brokers for this adapter.*
 
-Currently, **Gemini 3.5 Flash** is fully operational and streaming with sub-35ms latency. We are committed to robust, authenticated multitenant systems and will enable this pipeline shortly. Thank you for your patience!`;
+  const textToStream = customText || `### ${modelName}
+
+> **STATUS: NOT CONFIGURED**
+
+This model key is not present in the provider registry. Add it to \`AI_MODELS\` in \`server/ai.ts\` to enable it.`;
 
   const words = textToStream.split(' ');
   let currentIndex = 0;
@@ -344,5 +648,37 @@ Currently, **Gemini 3.5 Flash** is fully operational and streaming with sub-35ms
     accumulated += chunk;
     onChunk(chunk);
     currentIndex++;
-  }, 35); // Rapid token-by-token stream simulation
+  }, 25);
+}
+
+/**
+ * Single entry point used by the socket layer. Routes a model key to its
+ * transport (Google SDK or OpenAI-compatible) based on registry config, so
+ * adding a provider never requires changing the socket handler.
+ */
+export async function streamModel(
+  modelKey: string,
+  prompt: string,
+  onChunk: (text: string) => void,
+  onComplete: (fullText: string) => void,
+  onError: (errMessage: string) => void
+): Promise<void> {
+  const config = AI_MODELS[modelKey];
+
+  if (!config) {
+    streamNotice(modelKey, null, onChunk, onComplete);
+    return;
+  }
+
+  if (!isModelConfigured(modelKey)) {
+    streamNotice(modelKey, buildCredentialNotice(modelKey), onChunk, onComplete);
+    return;
+  }
+
+  if (config.transport === 'google-sdk') {
+    await streamRealGemini(prompt, onChunk, onComplete, onError);
+    return;
+  }
+
+  await streamOpenAICompatible(config, prompt, onChunk, onComplete, onError);
 }

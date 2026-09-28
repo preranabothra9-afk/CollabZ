@@ -4,6 +4,7 @@ import { db, UserModel, WorkspaceModel, MessageModel, ConversationModel, SavedRe
 import { Workspace, Conversation, SavedResponse, User } from '../src/types';
 import { createWorkspaceSchema, createChannelSchema, inviteUserSchema, submitPromptSchema } from './validators';
 import { getIo } from './socket';
+import { AI_MODELS, isModelConfigured, DEFAULT_COMPARISON_MODELS } from './ai';
 
 const router = Router();
 
@@ -347,6 +348,32 @@ router.delete('/saved-responses/:id', requireAuth, async (req: AuthenticatedRequ
 
 // --- ADMIN CONTROL PANEL SCHEMAS & METRICS ---
 
+// Live AI provider registry. Reports whether each model's credential is present
+// on the server. Never returns key material, only the variable name and a boolean.
+router.get('/admin/ai-models', requireAuth, adminOnly, async (req: AuthenticatedRequest, res: Response) => {
+  const models = Object.values(AI_MODELS).map((m) => ({
+    id: m.id,
+    name: m.name,
+    provider: m.provider,
+    lab: m.lab,
+    transport: m.transport,
+    upstreamModel: m.upstreamModel,
+    apiKeyEnv: m.apiKeyEnv,
+    signupUrl: m.signupUrl,
+    freeTier: m.freeTier,
+    status: m.status,
+    requiresPaidPlan: Boolean(m.requiresPaidPlan),
+    configured: isModelConfigured(m.id)
+  }));
+
+  res.json({
+    models,
+    configuredCount: models.filter((m) => m.configured).length,
+    totalCount: models.length,
+    comparisonDefaults: DEFAULT_COMPARISON_MODELS
+  });
+});
+
 // Backward compatibility console API endpoint
 router.get('/admin/analytics', requireAuth, adminOnly, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -427,12 +454,10 @@ router.get(['/admin/dashboard/metrics', '/admin/stats'], requireAuth, adminOnly,
     let aiRequestsToday = 0;
     let messagesToday = 0;
 
-    const modelCounts: Record<string, number> = {
-      'gemini-3.5-flash': 0,
-      'gemini-3.1-flash-lite': 0,
-      'gemini-flash-latest': 0,
-      'claude-3-5': 0,
-    };
+    // Seeded from the live provider registry so newly added models appear
+    // automatically and retired ones stop showing up as phantom zero rows.
+    const modelCounts: Record<string, number> = {};
+    for (const id of Object.keys(AI_MODELS)) modelCounts[id] = 0;
 
     messages.forEach((m) => {
       const createdMs = new Date(m.createdAt).getTime();
@@ -533,11 +558,15 @@ router.get(['/admin/dashboard/metrics', '/admin/stats'], requireAuth, adminOnly,
       workspaceActivity.push({ day: label, activeRooms: countCreated });
     }
 
-    // Model usage distribution
-    const modelUsage = Object.entries(modelCounts).map(([key, value]) => ({
-      name: key === 'gemini-3.5-flash' ? 'Gemini 3.5 Flash' : key === 'gemini-3.1-flash-lite' ? 'Gemini 3.1 Lite' : key === 'claude-3-5' ? 'Claude 3.5' : key,
-      value: value || 2
-    }));
+    // Model usage distribution. Names come from the provider registry, and only
+    // models that were actually used are reported (no fabricated floor value).
+    const modelUsage = Object.entries(modelCounts)
+      .filter(([, value]) => value > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, value]) => ({
+        name: AI_MODELS[key]?.name || key,
+        value
+      }));
 
     // System status summary
     const systemStatus = {

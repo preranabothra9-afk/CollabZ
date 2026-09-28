@@ -2,7 +2,7 @@ import { Server as SocketServer, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import jwt from 'jsonwebtoken';
 import { db } from './database';
-import { streamRealGemini, streamSoonResponse, AI_MODELS } from './ai';
+import { streamModel, AI_MODELS } from './ai';
 import { Message, PresenceUser } from '../src/types';
 import { generateUUID, getJwtSecret } from './auth';
 
@@ -217,7 +217,7 @@ export function setupSocketIO(server: HttpServer) {
       workspaceId: string;
       conversationId: string;
       promptText: string;
-      selectedModels: string[]; // e.g. ["gemini-3.5-flash", "gpt-4o", "claude-3-5"]
+      selectedModels: string[]; // e.g. ["gemini-3.5-flash", "gpt-oss-120b", "qwen3.8-27b"]
       userId: string;
       userName: string;
       userAvatar: string;
@@ -364,13 +364,8 @@ export function setupSocketIO(server: HttpServer) {
             });
           };
 
-          // Route to centralized AI providers
-          if (modelKey === 'gemini-3.5-flash') {
-            await streamRealGemini(promptText, onChunkCallback, onCompleteCallback, onErrorCallback);
-          } else {
-            // Non-Gemini models stream clean Coming Soon response rather than mock content
-            streamSoonResponse(modelKey, null, onChunkCallback, onCompleteCallback);
-          }
+          // Route to centralized AI providers; transport is resolved from the registry
+          await streamModel(modelKey, promptText, onChunkCallback, onCompleteCallback, onErrorCallback);
         } catch (err: any) {
           console.error(`Socket query loop failure on model ${modelKey}:`, err);
           io.to(roomName).emit('model-stream-failed', {

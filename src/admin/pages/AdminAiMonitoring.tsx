@@ -23,12 +23,27 @@ interface SystemStatus {
   pingMs: number;
 }
 
+interface ProviderModel {
+  id: string;
+  name: string;
+  provider: string;
+  lab: string;
+  transport: string;
+  upstreamModel: string;
+  apiKeyEnv: string;
+  signupUrl: string;
+  freeTier: string;
+  requiresPaidPlan: boolean;
+  configured: boolean;
+}
+
 export default function AdminAiMonitoring() {
   const { token } = useStore();
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [system, setSystem] = useState<SystemStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [providers, setProviders] = useState<ProviderModel[] | null>(null);
 
   const fetchMonitoringData = async () => {
     if (!token) return;
@@ -49,6 +64,18 @@ export default function AdminAiMonitoring() {
     } catch {
       setError('Connection failed.');
     } finally {
+      // Provider status is best-effort so telemetry still renders if it fails.
+      try {
+        const modelsRes = await fetch('/api/admin/ai-models', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (modelsRes.ok) {
+          const data = await modelsRes.json();
+          setProviders(data.models);
+        }
+      } catch {
+        /* provider status unavailable */
+      }
       setLoading(false);
     }
   };
@@ -132,22 +159,29 @@ export default function AdminAiMonitoring() {
             <div className="p-5 bg-panel/80 border border-line/60 rounded-2xl space-y-4">
               <h3 className="text-[13px] font-mono font-bold text-cat-indigo uppercase tracking-widest">Model Status</h3>
               <div className="space-y-3">
-                {[
-                  { name: 'gemini-3.5-flash', limit: '15 req/min', state: 'Operational', color: 'text-leaf border-emerald-500/20 bg-emerald-500/5' },
-                  { name: 'gemini-3.1-flash-lite', limit: '30 req/min', state: 'Operational', color: 'text-leaf border-emerald-500/20 bg-emerald-500/5' },
-                  { name: 'gemini-flash-latest', limit: '10 req/min', state: 'Operational', color: 'text-leaf border-emerald-500/20 bg-emerald-500/5' },
-                  { name: 'claude-3-5', limit: 'Rate limited', state: 'Offline', color: 'text-faint border-line bg-panel-2/50' }
-                ].map((m) => (
-                  <div key={m.name} className="p-3 bg-panel-2/40 border border-line/40 rounded-xl flex items-center justify-between hover:border-line-2 transition-colors">
-                    <div>
-                      <span className="text-[13px] font-semibold text-cream block">{m.name}</span>
-                      <span className="text-[13px] text-faint font-mono">{m.limit}</span>
+                {(providers ?? []).map((m) => (
+                  <div key={m.id} className="p-3 bg-panel-2/40 border border-line/40 rounded-xl flex items-center justify-between gap-3 hover:border-line-2 transition-colors">
+                    <div className="min-w-0">
+                      <span className="text-[13px] font-semibold text-cream block truncate">{m.name}</span>
+                      <span className="text-[13px] text-faint font-mono">
+                        {m.configured ? m.freeTier : `needs ${m.apiKeyEnv}`}
+                      </span>
+                      <span className="text-[12px] text-faint/80 font-mono">{m.lab} via {m.provider}</span>
                     </div>
-                    <div className={`px-2.5 py-1 border rounded-lg font-mono font-bold text-[13px] uppercase ${m.color}`}>
-                      {m.state}
+                    <div className={`shrink-0 px-2.5 py-1 border rounded-lg font-mono font-bold text-[13px] uppercase ${
+                      m.requiresPaidPlan
+                        ? 'text-warn border-amber-500/20 bg-amber-500/5'
+                        : m.configured
+                          ? 'text-leaf border-emerald-500/20 bg-emerald-500/5'
+                          : 'text-faint border-line bg-panel-2/50'
+                    }`}>
+                      {m.requiresPaidPlan ? 'Paid' : m.configured ? 'Ready' : 'No Key'}
                     </div>
                   </div>
                 ))}
+                {!providers && (
+                  <p className="text-[13px] text-faint font-mono">Loading provider registry...</p>
+                )}
               </div>
             </div>
 
@@ -157,9 +191,9 @@ export default function AdminAiMonitoring() {
                 <h3 className="text-[13px] font-mono font-bold text-cat-violet uppercase tracking-widest">Integration Settings</h3>
                 <div className="space-y-3 font-mono text-[14px]">
                   {[
-                    { label: 'SDK Driver', value: '@google/genai', icon: Cpu },
+                    { label: 'Gemini Driver', value: '@google/genai', icon: Cpu },
+                    { label: 'Other Drivers', value: 'OpenAI-compatible', color: 'text-cat-indigo', icon: Cpu },
                     { label: 'Streaming', value: 'ENABLED', color: 'text-leaf', icon: Activity },
-                    { label: 'Parallel Queries', value: 'Up to 4', icon: Zap },
                     { label: 'Fallback Model', value: 'gemini-3.1-flash-lite', icon: AlertTriangle },
                   ].map((item) => {
                     const Icon = item.icon;

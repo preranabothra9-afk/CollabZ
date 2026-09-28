@@ -64,7 +64,9 @@ const initialTheme = getInitialTheme();
 applyTheme(initialTheme);
 
 export const useUIStore = create<UIState>((set, get) => ({
-  selectedModels: ['gemini-3.5-flash'], // keep the active model active
+  // Default to the three-model comparison: Google Gemini + OpenAI GPT-OSS + Alibaba Qwen.
+  // All three sit on genuine free tiers, so only two signups are needed.
+  selectedModels: ['gemini-3.5-flash', 'gpt-oss-120b', 'qwen3.8-27b'],
   isSidebarOpen: true,
   isSavedResponsesOpen: false,
   isAdminPanelOpen: false,

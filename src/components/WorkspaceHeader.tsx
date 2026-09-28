@@ -3,14 +3,22 @@ import { Hash, Users, BookmarkCheck, Cpu, Circle, Wifi, LayoutGrid } from 'lucid
 
 const MODEL_LABELS: Record<string, string> = {
   'gemini-3.5-flash': 'Gemini 3.5',
-  'claude-3-5': 'Claude 3.5',
-  'gpt-4o': 'GPT-4o',
+  'gpt-oss-120b': 'GPT-OSS 120B',
+  'qwen3.8-27b': 'Qwen3.8 27B',
+  'gpt-oss-20b': 'GPT-OSS 20B',
+  'mistral-small': 'Mistral Small',
+  'deepseek-r1': 'DeepSeek R1',
+  'llama-3.3-70b': 'Llama 3.3 70B',
 };
 
 const MODEL_COLORS: Record<string, string> = {
   'gemini-3.5-flash': 'bg-blue-500/10 text-cat-blue border-blue-500/20',
-  'claude-3-5': 'bg-amber-500/10 text-warn border-amber-500/20',
-  'gpt-4o': 'bg-emerald-500/10 text-leaf border-emerald-500/20',
+  'gpt-oss-120b': 'bg-emerald-500/10 text-leaf border-emerald-500/20',
+  'qwen3.8-27b': 'bg-violet-500/10 text-cat-violet border-violet-500/20',
+  'gpt-oss-20b': 'bg-amber-500/10 text-warn border-amber-500/20',
+  'mistral-small': 'bg-sky-500/10 text-cat-indigo border-sky-500/20',
+  'deepseek-r1': 'bg-rose-500/10 text-rust border-rose-500/20',
+  'llama-3.3-70b': 'bg-amber-500/10 text-warn border-amber-500/20',
 };
 
 export default function WorkspaceHeader() {
