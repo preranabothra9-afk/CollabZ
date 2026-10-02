@@ -129,5 +129,5 @@ async function startServer() {
 }
 
 startServer().catch(err => {
-  console.error('Failed to initiate CollabZ Server:', err);
+  console.error('Failed to initiate MindSync Server:', err);
 });

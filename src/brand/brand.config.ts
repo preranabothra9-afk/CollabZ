@@ -1,5 +1,5 @@
 /**
- * CollabZ — Brand Configuration
+ * MindSync — Brand Configuration
  * 
  * Central source of truth for all branding tokens, metadata, and SEO configuration.
  * Every visual surface in the application should reference these values.
@@ -7,18 +7,18 @@
 
 // ─── Brand Identity ────────────────────────────────────────────────────
 export const BRAND = {
-  name: 'CollabZ',
+  name: 'MindSync',
   tagline: 'Real-Time AI Collaboration Platform',
   subtitle: 'Multi-Agent Sandbox',
   description: 'Real-time multi-model AI collaboration platform with parallel streaming, side-by-side comparative diagnostics, and enterprise-grade collaborative workspaces.',
   version: 'v2.4.0',
-  author: 'CollabZ Engineering',
-  url: 'https://collabz.dev',
+  author: 'MindSync Engineering',
+  url: 'https://mindsync.dev',
 } as const;
 
 // ─── Page Title System ─────────────────────────────────────────────────
 export const PAGE_TITLES: Record<string, string> = {
-  '/': `CollabZ - ${BRAND.tagline}`,
+  '/': `${BRAND.name} - ${BRAND.tagline}`,
   '/workspaces': `Your Workspaces | ${BRAND.name}`,
   '/workspace': `Live Room | ${BRAND.name}`,
   '/login': `Login | ${BRAND.name}`,
@@ -111,7 +111,7 @@ export const COLORS = {
 // ─── SEO & Meta Tags ───────────────────────────────────────────────────
 export const SEO = {
   title: DEFAULT_TITLE,
-  description: 'CollabZ is a real-time multi-model AI collaboration platform. Stream responses from multiple AI models side-by-side, collaborate in shared workspaces, and gain enterprise-grade analytics — all in one unified interface.',
+  description: 'MindSync is a real-time multi-model AI collaboration platform. Stream responses from multiple AI models side-by-side, collaborate in shared workspaces, and gain enterprise-grade analytics — all in one unified interface.',
   keywords: [
     'AI collaboration',
     'multi-model AI',
@@ -142,7 +142,7 @@ export const SEO = {
     title: `${BRAND.name} — ${BRAND.tagline}`,
     description: 'Real-time multi-model AI streaming, side-by-side comparison, and collaborative workspaces. Built for teams.',
     image: '/og-preview.png',
-    site: '@collabz',
+    site: '@mindsync',
   },
 } as const;
 

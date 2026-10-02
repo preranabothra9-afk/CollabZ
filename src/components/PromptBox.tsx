@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { useStore } from '../store';
-import { Send, CheckSquare, Square, Eye, Users, Zap } from 'lucide-react';
+import { Send, CheckSquare, Square, Eye, Users, Zap, Globe } from 'lucide-react';
 
 export default function PromptBox() {
   // Fine-grained selectors: this component otherwise re-renders on every
@@ -40,8 +40,10 @@ export default function PromptBox() {
   // First three are the default comparison set: Google, OpenAI and Alibaba labs,
   // all available on a genuine free tier. Llama is listed last because Groq
   // gates it behind a paid plan.
+  // `web` marks models that ground answers with a live web search; the rest
+  // answer only from frozen training data, so current facts can be stale.
   const models = [
-    { key: 'gemini-2.5-flash', label: 'Gemini 2.5', activeColor: 'bg-blue-500/10 text-cat-blue border-blue-500/25' },
+    { key: 'gemini-2.5-flash', label: 'Gemini 2.5', activeColor: 'bg-blue-500/10 text-cat-blue border-blue-500/25', web: true },
     { key: 'gpt-oss-120b', label: 'GPT-OSS 120B', activeColor: 'bg-emerald-500/10 text-leaf border-emerald-500/25' },
     { key: 'qwen3.8-27b', label: 'Qwen3.8 27B', activeColor: 'bg-violet-500/10 text-cat-violet border-violet-500/25' },
     { key: 'gpt-oss-20b', label: 'GPT-OSS 20B', activeColor: 'bg-amber-500/10 text-warn border-amber-500/25' },
@@ -67,9 +69,11 @@ export default function PromptBox() {
             const isSelected = selectedModels.includes(mod.key);
             return (
               <button key={mod.key} type="button" onClick={() => toggleModel(mod.key)}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[13px] font-medium border transition-all cursor-pointer ${isSelected ? mod.activeColor : 'bg-panel-2/50 border-line/50 text-faint hover:text-sand hover:border-line-2'}`} title={mod.label}>
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[13px] font-medium border transition-all cursor-pointer ${isSelected ? mod.activeColor : 'bg-panel-2/50 border-line/50 text-faint hover:text-sand hover:border-line-2'}`}
+                title={mod.web ? `${mod.label} — searches the web for current facts` : mod.label}>
                 {isSelected ? <CheckSquare size={11} className="text-current" /> : <Square size={11} className="text-faint" />}
                 <span>{mod.label}</span>
+                {mod.web && <Globe size={10} className="text-sky-400 shrink-0" />}
               </button>
             );
           })}

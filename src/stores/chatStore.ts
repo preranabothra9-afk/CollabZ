@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Conversation, Message, SavedResponse, PresenceUser } from '../types';
+import { Conversation, Message, SavedResponse, PresenceUser, Claim, ClaimRelation, ContradictionDiscussion } from '../types';
 
 export interface ChatState {
   conversations: Conversation[];
@@ -12,6 +12,12 @@ export interface ChatState {
   hasMoreMessages: boolean;
   isLoadingOlder: boolean;
   highlightMessageId: string | null;
+  /** Durable claims extracted from this room's AI responses. */
+  claims: Claim[];
+  /** Contradiction-graph edges between this room's claims. */
+  relations: ClaimRelation[];
+  /** Human discussions for the room's contradictions, keyed by relation id. */
+  discussions: Record<string, ContradictionDiscussion>;
 
   setConversations: (conversations: Conversation[]) => void;
   setActiveConversation: (conv: Conversation | null) => void;
@@ -23,6 +29,9 @@ export interface ChatState {
   setHasMoreMessages: (hasMore: boolean) => void;
   setIsLoadingOlder: (loading: boolean) => void;
   setHighlightMessageId: (id: string | null) => void;
+  setClaims: (claims: Claim[]) => void;
+  setRelations: (relations: ClaimRelation[]) => void;
+  setDiscussions: (discussions: Record<string, ContradictionDiscussion>) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -36,6 +45,9 @@ export const useChatStore = create<ChatState>((set) => ({
   hasMoreMessages: false,
   isLoadingOlder: false,
   highlightMessageId: null,
+  claims: [],
+  relations: [],
+  discussions: {},
 
   setConversations: (conversations) => set({ conversations }),
   setActiveConversation: (activeConversation) => set({ activeConversation, messages: [], hasMoreMessages: false }),
@@ -47,4 +59,7 @@ export const useChatStore = create<ChatState>((set) => ({
   setHasMoreMessages: (hasMoreMessages) => set({ hasMoreMessages }),
   setIsLoadingOlder: (isLoadingOlder) => set({ isLoadingOlder }),
   setHighlightMessageId: (highlightMessageId) => set({ highlightMessageId }),
+  setClaims: (claims) => set({ claims }),
+  setRelations: (relations) => set({ relations }),
+  setDiscussions: (discussions) => set({ discussions }),
 }));

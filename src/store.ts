@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { io } from 'socket.io-client';
-import { User, Workspace, Conversation, Message, SavedResponse } from './types';
+import { User, Workspace, Conversation, Message, SavedResponse, Claim, ClaimRelation, DiscussionComment, ContradictionVote, ContradictionVoteChoice, ContradictionDiscussion } from './types';
 
 /** Compact search hit returned by the room history search endpoint. */
 export interface SearchResult {
@@ -36,6 +36,12 @@ export interface AppState {
   hasMoreMessages: boolean;
   isLoadingOlder: boolean;
   highlightMessageId: string | null;
+  /** Durable claims extracted from the active room's AI responses. */
+  claims: Claim[];
+  /** Contradiction-graph edges between the active room's claims. */
+  relations: ClaimRelation[];
+  /** Human discussions for the room's contradictions, keyed by relation id. */
+  discussions: Record<string, ContradictionDiscussion>;
   setHighlightMessageId: (id: string | null) => void;
   savedResponses: SavedResponse[];
   // Real-time Presence
@@ -95,6 +101,32 @@ export interface AppState {
   searchHistory: (conversationId: string, query: string) => Promise<SearchResult[]>;
   /** Scrolls the feed to a message, paging history in if it isn't loaded yet. */
   jumpToMessage: (messageId: string, createdAt: string) => Promise<void>;
+  /** Loads the durable claims extracted from a room's AI responses. */
+  fetchClaims: (conversationId: string) => Promise<void>;
+  /** Loads the contradiction-graph edges between a room's claims. */
+  fetchRelations: (conversationId: string) => Promise<void>;
+  /** Loads the human discussion (comments + poll votes) for one contradiction. */
+  fetchDiscussion: (relationId: string) => Promise<void>;
+  /** Adds a comment or reply to a contradiction's thread. */
+  addContradictionComment: (relationId: string, text: string, parentId?: string | null) => Promise<void>;
+  /** Deletes a comment from a contradiction's thread. */
+  deleteContradictionComment: (relationId: string, commentId: string) => Promise<void>;
+  /** Casts or changes a user's poll vote on a contradiction. */
+  castContradictionVote: (relationId: string, choice: ContradictionVoteChoice) => Promise<void>;
+  /**
+   * Closes a contradiction as resolved or dismissed, with a reason. Resolves to
+   * null on success, or the reason it was refused (authorisation, validation,
+   * server error) so the UI can show the member exactly what happened.
+   */
+  resolveContradiction: (relationId: string, status: 'resolved' | 'evidence-needed' | 'dismissed', resolution: string) => Promise<string | null>;
+  /** Deletes one claim from the current room. */
+  deleteClaim: (claimId: string) => Promise<void>;
+  /** Deletes every claim in the current room. */
+  clearClaims: () => Promise<void>;
+  /** Removes one prompt and its response(s) from the current room. */
+  deleteMessage: (messageId: string) => Promise<void>;
+  /** Clears every prompt and response in the current room, keeping the room. */
+  clearChat: () => Promise<void>;
   submitPrompt: (promptText: string) => void;
   /** Stops one active model stream, or every stream of a message when modelKey is omitted. */
   stopGeneration: (messageId: string, modelKey?: string) => void;
@@ -197,6 +229,9 @@ export const useStore = create<AppState>((set, get) => {
 
     socket.on('connect', () => {
       useSocketStore.setState({ socketConnected: true });
+      // A handshake that initially failed has now recovered — give the
+      // reconnect budget back for the next transient blip.
+      authRetries = 0;
       console.log('Synchronized securely with real-time sockets.');
       
       socket.emit('join-workspace', {
@@ -209,6 +244,44 @@ export const useStore = create<AppState>((set, get) => {
 
     socket.on('disconnect', () => {
       useSocketStore.setState({ socketConnected: false });
+    });
+
+    // A rejected handshake is the middleware refusing the socket. socket.io
+    // does NOT retry middleware rejections on its own (verified: one attempt,
+    // then dead), so without this handler the room would silently go quiet
+    // whenever a short-lived access token expired mid-session — or whenever a
+    // transient backend blip (e.g. a DNS hiccup reaching Atlas) made the
+    // handshake's user lookup fail. Rotate the token and reconnect.
+    let authRetries = 0;
+    const MAX_AUTH_RETRIES = 5;
+    socket.on('connect_error', async (err: any) => {
+      console.warn('Socket handshake refused, rotating session token:', err?.message);
+      if (authRetries >= MAX_AUTH_RETRIES) {
+        console.warn('Socket reconnect budget exhausted — a page refresh will resume real-time.');
+        return;
+      }
+      authRetries++;
+      try {
+        const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+        });
+        if (!refreshRes.ok) {
+          // No usable refresh cookie: nothing to reconnect with. The header
+          // already shows "Off", and the next API call routes to login.
+          console.warn('Socket reconnect aborted: session cannot be refreshed.');
+          return;
+        }
+        const data = await refreshRes.json();
+        useAuthStore.setState({ user: data.user, token: data.token, authError: null });
+        // Re-arm the handshake with the rotated token, then retry with a
+        // modest backoff so a sustained backend outage can't hammer the server.
+        socket.auth = { token: data.token };
+        setTimeout(() => socket.connect(), Math.min(1000 * authRetries, 5000));
+      } catch (refreshErr) {
+        console.error('Socket reconnect token rotation failed:', refreshErr);
+      }
     });
 
     socket.on('error-alert', (error: { message: string }) => {
@@ -287,6 +360,9 @@ export const useStore = create<AppState>((set, get) => {
       useChatStore.setState({
         messages: useChatStore.getState().messages.map(m => {
           if (m.id === data.messageId && m.modelResponses[data.modelKey]) {
+            // The user stopped this card; don't let a late status event flip
+            // it back to streaming.
+            if (m.modelResponses[data.modelKey].status === 'stopped') return m;
             return {
               ...m,
               modelResponses: {
@@ -308,6 +384,9 @@ export const useStore = create<AppState>((set, get) => {
         messages: useChatStore.getState().messages.map(m => {
           if (m.id === data.messageId && m.modelResponses[data.modelKey]) {
             const currentResponse = m.modelResponses[data.modelKey];
+            // Tokens in flight when the user pressed Stop must not keep
+            // appending to a card already marked stopped.
+            if (currentResponse.status === 'stopped') return m;
             return {
               ...m,
               modelResponses: {
@@ -390,6 +469,134 @@ export const useStore = create<AppState>((set, get) => {
       });
     });
 
+    // A finished AI response contributed new durable claims to the room.
+    // Prepend them (newest first) so the claims panel stays ordered without a
+    // full reload, and only for the room the user is currently viewing.
+    socket.on('claims-created', (data: { messageId: string; modelKey: string; claims: Claim[] }) => {
+      const activeConv = useChatStore.getState().activeConversation;
+      if (!data?.claims || data.claims.length === 0) return;
+      if (data.claims[0].conversationId !== activeConv?.id) return;
+      useChatStore.setState((state) => ({ claims: [...data.claims, ...state.claims] }));
+    });
+
+    // Another member deleted one claim; drop it if we're viewing that room.
+    socket.on('claim-deleted', (data: { conversationId: string; claimId: string }) => {
+      const activeConv = useChatStore.getState().activeConversation;
+      if (!data?.claimId || data.conversationId !== activeConv?.id) return;
+      useChatStore.setState((state) => ({
+        claims: state.claims.filter((c) => c.id !== data.claimId),
+        // The cascade removes every edge that touched the deleted claim.
+        relations: state.relations.filter((r) => r.claimAId !== data.claimId && r.claimBId !== data.claimId)
+      }));
+    });
+
+    // Another member cleared the room's claims.
+    socket.on('claims-cleared', (data: { conversationId: string }) => {
+      const activeConv = useChatStore.getState().activeConversation;
+      if (data.conversationId !== activeConv?.id) return;
+      useChatStore.setState({ claims: [], relations: [] });
+    });
+
+    // Another member removed a prompt and its responses. The claims that
+    // response produced — and any contradiction it was part of — go with it.
+    socket.on('message-deleted', (data: { conversationId: string; messageId: string; claimIds?: string[] }) => {
+      const activeConv = useChatStore.getState().activeConversation;
+      if (!data?.messageId || data.conversationId !== activeConv?.id) return;
+      const removed = new Set(data.claimIds ?? []);
+      useChatStore.setState((state) => ({
+        messages: state.messages.filter((m) => m.id !== data.messageId),
+        claims: state.claims.filter((c) => c.messageId !== data.messageId),
+        relations: state.relations.filter((r) => !removed.has(r.claimAId) && !removed.has(r.claimBId)),
+      }));
+    });
+
+    // Another member cleared the whole room's chat; the room's memory goes too.
+    socket.on('messages-cleared', (data: { conversationId: string }) => {
+      const activeConv = useChatStore.getState().activeConversation;
+      if (data.conversationId !== activeConv?.id) return;
+      useChatStore.setState({ messages: [], claims: [], relations: [], discussions: {} });
+    });
+
+    // The contradiction detector found a conflict (or other relationship) between
+    // two of the room's claims. Prepend newest-first like the claims list. Only
+    // CONTRADICT edges are broadcast, so anything arriving here is a conflict.
+    socket.on('contradiction-detected', (data: { conversationId: string; relations: ClaimRelation[] }) => {
+      const activeConv = useChatStore.getState().activeConversation;
+      if (!data?.relations || data.relations.length === 0) return;
+      if (data.conversationId !== activeConv?.id) return;
+      useChatStore.setState((state) => {
+        const seen = new Set(state.relations.map((r) => r.id));
+        const fresh = data.relations.filter((r) => !seen.has(r.id));
+        return { relations: [...fresh, ...state.relations] };
+      });
+    });
+
+    // ── Contradiction discussion (human layer) ───────────────────────────
+    // These keep the thread, the poll, and the closed state live for everyone
+    // in the room. Each is ignored unless it belongs to the room the user is
+    // currently viewing, so a busy workspace never leaks other rooms' threads.
+
+    socket.on('contradiction-comment-added', (data: { conversationId: string; relationId: string; comment: DiscussionComment }) => {
+      const activeConv = useChatStore.getState().activeConversation;
+      if (!data?.comment || data.conversationId !== activeConv?.id) return;
+      useChatStore.setState((state) => {
+        const existing = state.discussions[data.relationId];
+        // If the discussion isn't open locally yet there is nothing to add to;
+        // it loads in full when the user opens the thread.
+        if (!existing) return {};
+        // The author's own REST response already added this comment; the echo
+        // must not double it.
+        if (existing.comments.some((c) => c.id === data.comment.id)) return {};
+        return {
+          discussions: {
+            ...state.discussions,
+            [data.relationId]: { ...existing, comments: [...existing.comments, data.comment] }
+          }
+        };
+      });
+    });
+
+    socket.on('contradiction-comment-deleted', (data: { conversationId: string; relationId: string; commentId: string }) => {
+      const activeConv = useChatStore.getState().activeConversation;
+      if (!data?.commentId || data.conversationId !== activeConv?.id) return;
+      useChatStore.setState((state) => {
+        const existing = state.discussions[data.relationId];
+        if (!existing) return {};
+        return {
+          discussions: {
+            ...state.discussions,
+            [data.relationId]: { ...existing, comments: existing.comments.filter((c) => c.id !== data.commentId) }
+          }
+        };
+      });
+    });
+
+    socket.on('contradiction-vote-updated', (data: { conversationId: string; relationId: string; votes: ContradictionVote[] }) => {
+      const activeConv = useChatStore.getState().activeConversation;
+      if (!data?.votes || data.conversationId !== activeConv?.id) return;
+      useChatStore.setState((state) => {
+        const existing = state.discussions[data.relationId];
+        if (!existing) return {};
+        return {
+          discussions: {
+            ...state.discussions,
+            [data.relationId]: { ...existing, votes: data.votes }
+          }
+        };
+      });
+    });
+
+    // An authorized human closed the contradiction. The edge itself is the
+    // source of truth for the closed state, so this updates the relation, not
+    // the discussion.
+    socket.on('contradiction-closed', (data: { conversationId: string; relationId: string; relation: ClaimRelation }) => {
+      const activeConv = useChatStore.getState().activeConversation;
+      if (!data?.relation || data.conversationId !== activeConv?.id) return;
+      useChatStore.setState((state) => ({
+        relations: state.relations.map((r) => (r.id === data.relationId ? data.relation : r))
+      }));
+    });
+
     useSocketStore.setState({ socket });
   };
 
@@ -413,6 +620,9 @@ export const useStore = create<AppState>((set, get) => {
     presence: useChatStore.getState().presence,
     collaborativePromptText: useChatStore.getState().collaborativePromptText,
     whoIsEditing: useChatStore.getState().whoIsEditing,
+    claims: useChatStore.getState().claims,
+    relations: useChatStore.getState().relations,
+    discussions: useChatStore.getState().discussions,
 
     selectedModels: useUIStore.getState().selectedModels,
     isSidebarOpen: useUIStore.getState().isSidebarOpen,
@@ -773,9 +983,11 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     setActiveConversation: (conv) => {
-      useChatStore.setState({ activeConversation: conv, messages: [], hasMoreMessages: false, highlightMessageId: null });
+      useChatStore.setState({ activeConversation: conv, messages: [], hasMoreMessages: false, highlightMessageId: null, claims: [], relations: [], discussions: {} });
       if (conv) {
         get().fetchMessages(conv.id);
+        get().fetchClaims(conv.id);
+        get().fetchRelations(conv.id);
       }
     },
 
@@ -835,6 +1047,259 @@ export const useStore = create<AppState>((set, get) => {
         console.error('Error searching history:', err);
       }
       return [];
+    },
+
+    fetchClaims: async (conversationId) => {
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conversationId}/claims`);
+        if (res.ok) {
+          const data = await res.json();
+          useChatStore.setState({ claims: (data.claims ?? []) as Claim[] });
+        }
+      } catch (err) {
+        console.error('Error fetching room claims:', err);
+      }
+    },
+
+    fetchRelations: async (conversationId) => {
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conversationId}/relations`);
+        if (res.ok) {
+          const data = await res.json();
+          useChatStore.setState({ relations: (data.relations ?? []) as ClaimRelation[] });
+        }
+      } catch (err) {
+        console.error('Error fetching claim relationships:', err);
+      }
+    },
+
+    fetchDiscussion: async (relationId) => {
+      const conv = useChatStore.getState().activeConversation;
+      if (!conv || !relationId) return;
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conv.id}/relations/${relationId}/discussion`);
+        if (res.ok) {
+          const data = await res.json();
+          useChatStore.setState((state) => ({
+            discussions: {
+              ...state.discussions,
+              [relationId]: {
+                comments: (data.comments ?? []) as DiscussionComment[],
+                votes: (data.votes ?? []) as ContradictionVote[],
+              }
+            }
+          }));
+        }
+      } catch (err) {
+        console.error('Error fetching contradiction discussion:', err);
+      }
+    },
+
+    addContradictionComment: async (relationId, text, parentId) => {
+      const conv = useChatStore.getState().activeConversation;
+      const trimmed = text.trim();
+      if (!conv || !relationId || !trimmed) return;
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conv.id}/relations/${relationId}/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: trimmed, parentId: parentId ?? null })
+        });
+        if (!res.ok) return;
+        const comment: DiscussionComment = await res.json();
+        useChatStore.setState((state) => {
+          const existing = state.discussions[relationId] ?? { comments: [], votes: [] };
+          // The socket echo will also deliver this comment; drop it there by id.
+          if (existing.comments.some((c) => c.id === comment.id)) return {};
+          return {
+            discussions: {
+              ...state.discussions,
+              [relationId]: { ...existing, comments: [...existing.comments, comment] }
+            }
+          };
+        });
+      } catch (err) {
+        console.error('Error adding contradiction comment:', err);
+      }
+    },
+
+    deleteContradictionComment: async (relationId, commentId) => {
+      const conv = useChatStore.getState().activeConversation;
+      if (!conv || !relationId || !commentId) return;
+      const before = useChatStore.getState().discussions[relationId];
+      // Optimistic removal so the thread reacts instantly to the click.
+      useChatStore.setState((state) => {
+        const existing = state.discussions[relationId];
+        if (!existing) return {};
+        return {
+          discussions: {
+            ...state.discussions,
+            [relationId]: { ...existing, comments: existing.comments.filter((c) => c.id !== commentId) }
+          }
+        };
+      });
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conv.id}/relations/${relationId}/comments/${commentId}`, { method: 'DELETE' });
+        if (!res.ok) {
+          useChatStore.setState((state) => ({ discussions: { ...state.discussions, [relationId]: before } }));
+        }
+      } catch (err) {
+        useChatStore.setState((state) => ({ discussions: { ...state.discussions, [relationId]: before } }));
+        console.error('Error deleting contradiction comment:', err);
+      }
+    },
+
+    castContradictionVote: async (relationId, choice) => {
+      const conv = useChatStore.getState().activeConversation;
+      if (!conv || !relationId) return;
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conv.id}/relations/${relationId}/vote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ choice })
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        // The server is authoritative for the tally; adopt its full vote set.
+        const votes = (data.votes ?? []) as ContradictionVote[];
+        useChatStore.setState((state) => {
+          const existing = state.discussions[relationId] ?? { comments: [], votes: [] };
+          return {
+            discussions: {
+              ...state.discussions,
+              [relationId]: { ...existing, votes }
+            }
+          };
+        });
+      } catch (err) {
+        console.error('Error casting contradiction vote:', err);
+      }
+    },
+
+    resolveContradiction: async (relationId, status, resolution) => {
+      const conv = useChatStore.getState().activeConversation;
+      if (!conv || !relationId) return 'This room is no longer active.';
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conv.id}/relations/${relationId}/${status}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resolution })
+        });
+        if (!res.ok) {
+          // Surface the server's reason (403 owner-only, 404 gone, 400 reason
+          // required) instead of failing silently.
+          let reason = `The server refused to close the contradiction (HTTP ${res.status}).`;
+          try {
+            const data = await res.json();
+            if (data?.error) reason = data.error;
+          } catch { /* keep the generic reason */ }
+          return reason;
+        }
+        const data = await res.json();
+        const updated = data.relation as ClaimRelation | undefined;
+        if (updated) {
+          useChatStore.setState((state) => ({
+            relations: state.relations.map((r) => (r.id === relationId ? updated : r))
+          }));
+        }
+        return null;
+      } catch (err) {
+        console.error('Error closing contradiction:', err);
+        return 'Network error while closing the contradiction. Please try again.';
+      }
+    },
+
+    deleteClaim: async (claimId) => {
+      const conv = useChatStore.getState().activeConversation;
+      if (!conv || !claimId) return;
+      // Optimistic removal so the panel reacts instantly; the REST call is
+      // authoritative and a failure restores the claim.
+      const before = useChatStore.getState().claims;
+      const beforeRelations = useChatStore.getState().relations;
+      useChatStore.setState({
+        claims: before.filter((c) => c.id !== claimId),
+        // The server cascades edge deletion; mirror it locally so no orphan
+        // contradiction outlives the claim it referenced.
+        relations: beforeRelations.filter((r) => r.claimAId !== claimId && r.claimBId !== claimId)
+      });
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conv.id}/claims/${claimId}`, { method: 'DELETE' });
+        if (!res.ok) useChatStore.setState({ claims: before, relations: beforeRelations });
+        else get().socket?.emit('claim-deleted', { conversationId: conv.id, claimId });
+      } catch (err) {
+        useChatStore.setState({ claims: before, relations: beforeRelations });
+        console.error('Error deleting claim:', err);
+      }
+    },
+
+    clearClaims: async () => {
+      const conv = useChatStore.getState().activeConversation;
+      if (!conv) return;
+      const before = useChatStore.getState().claims;
+      const beforeRelations = useChatStore.getState().relations;
+      useChatStore.setState({ claims: [], relations: [] });
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conv.id}/claims`, { method: 'DELETE' });
+        if (!res.ok) useChatStore.setState({ claims: before, relations: beforeRelations });
+        else get().socket?.emit('claims-cleared', { conversationId: conv.id });
+      } catch (err) {
+        useChatStore.setState({ claims: before, relations: beforeRelations });
+        console.error('Error clearing room claims:', err);
+      }
+    },
+
+    deleteMessage: async (messageId) => {
+      const conv = useChatStore.getState().activeConversation;
+      if (!conv || !messageId) return;
+      const before = {
+        messages: useChatStore.getState().messages,
+        claims: useChatStore.getState().claims,
+        relations: useChatStore.getState().relations,
+      };
+      const removedClaims = before.claims.filter((c) => c.messageId === messageId).map((c) => c.id);
+      // Optimistic: drop the row and the room memory derived from it. The REST
+      // call is authoritative and restores everything if it refuses.
+      useChatStore.setState((state) => ({
+        messages: state.messages.filter((m) => m.id !== messageId),
+        claims: state.claims.filter((c) => c.messageId !== messageId),
+        relations: state.relations.filter((r) => !removedClaims.includes(r.claimAId) && !removedClaims.includes(r.claimBId)),
+      }));
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conv.id}/${messageId}`, { method: 'DELETE' });
+        if (!res.ok) {
+          useChatStore.setState(before);
+        } else {
+          get().socket?.emit('message-deleted', { conversationId: conv.id, messageId, claimIds: removedClaims });
+        }
+      } catch (err) {
+        useChatStore.setState(before);
+        console.error('Error deleting message:', err);
+      }
+    },
+
+    clearChat: async () => {
+      const conv = useChatStore.getState().activeConversation;
+      if (!conv) return;
+      const before = {
+        messages: useChatStore.getState().messages,
+        claims: useChatStore.getState().claims,
+        relations: useChatStore.getState().relations,
+        discussions: useChatStore.getState().discussions,
+      };
+      // The room's memory is derived from its messages, so clearing the chat
+      // clears the claims and contradictions with it.
+      useChatStore.setState({ messages: [], claims: [], relations: [], discussions: {} });
+      try {
+        const res = await secureFetch(`${API_BASE}/messages/${conv.id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          useChatStore.setState(before);
+        } else {
+          get().socket?.emit('messages-cleared', { conversationId: conv.id });
+        }
+      } catch (err) {
+        useChatStore.setState(before);
+        console.error('Error clearing room chat:', err);
+      }
     },
 
     jumpToMessage: async (messageId, createdAt) => {
@@ -908,6 +1373,29 @@ export const useStore = create<AppState>((set, get) => {
 
     stopGeneration: (messageId, modelKey) => {
       const socket = useSocketStore.getState().socket;
+
+      // Flip the card to "stopped" immediately. Waiting for the server
+      // round-trip is what made Stop feel unresponsive — the abort has to
+      // propagate to the provider before the UI acknowledges the click.
+      // The server's model-stream-stopped event confirms this shortly after;
+      // a race that completes the model first overwrites it with 'completed'.
+      const markStopped = (m: Message): Message => {
+        if (m.id !== messageId) return m;
+        const responses = { ...m.modelResponses };
+        const keys = modelKey ? [modelKey] : Object.keys(responses);
+        for (const k of keys) {
+          const r = responses[k];
+          if (r && (r.status === 'streaming' || r.status === 'pending')) {
+            responses[k] = { ...r, status: 'stopped' };
+          }
+        }
+        return { ...m, modelResponses: responses };
+      };
+
+      useChatStore.setState((state) => ({
+        messages: state.messages.map(markStopped),
+      }));
+
       if (!socket || !messageId) return;
       socket.emit('stop-generation', { messageId, modelKey });
     },
@@ -1039,6 +1527,9 @@ useChatStore.subscribe((state) => {
     presence: state.presence,
     collaborativePromptText: state.collaborativePromptText,
     whoIsEditing: state.whoIsEditing,
+    claims: state.claims,
+    relations: state.relations,
+    discussions: state.discussions,
   });
 });
 

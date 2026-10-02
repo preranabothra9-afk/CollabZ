@@ -1,30 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" fill="none">
   <defs>
-    <linearGradient id="icon-grad" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+    <linearGradient id="ms-grad" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#6366f1"/>
       <stop offset="50%" stop-color="#4f46e5"/>
       <stop offset="100%" stop-color="#4338ca"/>
     </linearGradient>
-    <linearGradient id="icon-bg" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+    <linearGradient id="ms-bg" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#6366f1" stop-opacity="0.14"/>
       <stop offset="100%" stop-color="#4338ca" stop-opacity="0.04"/>
     </linearGradient>
   </defs>
   <!-- Subtle background shape -->
-  <rect width="36" height="36" rx="10" fill="url(#icon-bg)"/>
-  <rect width="36" height="36" rx="10" stroke="url(#icon-grad)" stroke-width="0.75" opacity="0.35"/>
-  <!-- Neural synapse triangle paths -->
-  <path d="M10 26 L18 8 L26 26" stroke="url(#icon-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <path d="M10 26 L26 26" stroke="url(#icon-grad)" stroke-width="1.4" stroke-linecap="round" opacity="0.5"/>
-  <!-- Signal flow curves -->
-  <path d="M13 17 Q18 21 23 17" stroke="#6366f1" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.65"/>
-  <path d="M11.5 22 Q18 26 24.5 22" stroke="#4338ca" stroke-width="0.9" stroke-linecap="round" fill="none" opacity="0.45"/>
-  <!-- Neural nodes -->
-  <circle cx="18" cy="8" r="3" fill="url(#icon-grad)"/>
-  <circle cx="10" cy="26" r="2.5" fill="#4f46e5"/>
-  <circle cx="26" cy="26" r="2.5" fill="#4338ca"/>
+  <rect width="36" height="36" rx="10" fill="url(#ms-bg)"/>
+  <rect width="36" height="36" rx="10" stroke="url(#ms-grad)" stroke-width="0.75" opacity="0.35"/>
+  <!-- The "M" — two uprights joined by a central notch -->
+  <path d="M10 27 L10 9 L18 20 L26 9 L26 27" stroke="url(#ms-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Baseline -->
+  <path d="M10 27 L26 27" stroke="url(#ms-grad)" stroke-width="1.4" stroke-linecap="round" opacity="0.5"/>
+  <!-- Sync oscillation ripple -->
+  <path d="M12.5 32 Q15.5 29.5 18 32 Q20.5 34.5 23.5 32" stroke="#6366f1" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.7"/>
+  <!-- Node highlights at the three peaks -->
+  <circle cx="18" cy="20" r="3" fill="url(#ms-grad)"/>
+  <circle cx="10" cy="9" r="2.5" fill="#4f46e5"/>
+  <circle cx="26" cy="9" r="2.5" fill="#4338ca"/>
   <!-- Inner pulse dots -->
-  <circle cx="18" cy="8" r="1.2" fill="white" opacity="0.9"/>
-  <circle cx="10" cy="26" r="1" fill="white" opacity="0.8"/>
-  <circle cx="26" cy="26" r="1" fill="white" opacity="0.8"/>
+  <circle cx="18" cy="20" r="1.2" fill="white" opacity="0.9"/>
+  <circle cx="10" cy="9" r="1" fill="white" opacity="0.8"/>
+  <circle cx="26" cy="9" r="1" fill="white" opacity="0.8"/>
 </svg>

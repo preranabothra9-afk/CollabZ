@@ -5,17 +5,17 @@ import {
   Terminal, Sparkles, KeyRound, MailCheck, ArrowLeft, ShieldCheck,
   CheckCircle2, ExternalLink, Copy, Check
 } from 'lucide-react';
-import { SynapseMark, BRAND } from '../brand';
+import { MindMark, BRAND } from '../brand';
 import ThemeSwitcher from './ThemeSwitcher';
 import { CollabIllustration } from './CollabIllustration';
 
 type AuthView = 'login' | 'register' | 'forgot' | 'reset' | 'reset-done' | 'verify';
 
-const REMEMBER_KEY = 'collabz-remember';
-const REMEMBERED_EMAIL_KEY = 'collabz-remembered-email';
+const REMEMBER_KEY = 'mindsync-remember';
+const REMEMBERED_EMAIL_KEY = 'mindsync-remembered-email';
 
 /**
- * CollabZ authentication portal -- a warm, two-column sign-in page.
+ * MindSync authentication portal -- a warm, two-column sign-in page.
  * Self-contained: pulls auth actions straight from the store.
  */
 export default function AuthPortal() {
@@ -65,10 +65,12 @@ export default function AuthPortal() {
   // Restore "remember me" email on mount
   useEffect(() => {
     try {
-      const flag = localStorage.getItem(REMEMBER_KEY) === '1';
+      // Fall back to the legacy `collabz-*` keys so returning users keep
+      // their remembered email through the MindSync rebrand.
+      const flag = localStorage.getItem(REMEMBER_KEY) === '1' || localStorage.getItem('collabz-remember') === '1';
       setRemember(flag);
       if (flag) {
-        setEmail(localStorage.getItem(REMEMBERED_EMAIL_KEY) || '');
+        setEmail(localStorage.getItem(REMEMBERED_EMAIL_KEY) || localStorage.getItem('collabz-remembered-email') || '');
       }
     } catch {
       /* localStorage unavailable */
@@ -759,7 +761,7 @@ export default function AuthPortal() {
         {/* -- Brand side ------------------------------------------- */}
         <section className="w-full max-w-lg text-center lg:max-w-none lg:flex-1 lg:text-left">
           <div className="mb-8 flex items-center justify-center gap-3 lg:justify-start">
-            <SynapseMark size={38} />
+            <MindMark size={38} />
             <span className="font-display text-2xl font-semibold tracking-tight text-cream">
               {BRAND.name}
             </span>

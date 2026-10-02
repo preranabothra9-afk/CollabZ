@@ -5,11 +5,11 @@ import {
   Columns3, BookmarkCheck, LineChart, ShieldCheck, Zap, Hash,
   CheckCircle2, ChevronRight, Cpu, MessageSquare, LayoutDashboard, LogOut
 } from 'lucide-react';
-import { SynapseMark, BRAND } from '../brand';
+import { MindMark, BRAND } from '../brand';
 import ThemeSwitcher from './ThemeSwitcher';
 
 /**
- * CollabZ public landing page — the first surface unauthenticated visitors see.
+ * MindSync public landing page — the first surface unauthenticated visitors see.
  * Sits ahead of the auth portal at "/"; CTAs route to /login and /register.
  */
 export default function HomePage() {
@@ -70,7 +70,7 @@ export default function HomePage() {
       >
         <nav className="max-w-7xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5 select-none">
-            <SynapseMark size={30} />
+            <MindMark size={30} />
             <span className="font-bold text-cream tracking-tight text-lg">
               Collab<span className="text-ember">Z</span>
             </span>
@@ -320,7 +320,7 @@ export default function HomePage() {
       <section className="relative py-24 px-5 sm:px-8">
         <Reveal className="max-w-3xl mx-auto text-center">
           <div className="mx-auto mb-8 flex h-20 w-20 items-center justify-center rounded-3xl border border-line bg-panel shadow-md">
-            <SynapseMark size={36} />
+            <MindMark size={36} />
           </div>
           <h2 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight text-cream mt-6">
             Stop guessing which model is best.
@@ -368,7 +368,7 @@ export default function HomePage() {
       <footer className="relative border-t border-line py-10 px-5 sm:px-8">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-5">
           <div className="flex items-center gap-2.5 select-none">
-            <SynapseMark size={24} />
+            <MindMark size={24} />
             <span className="font-bold text-cream tracking-tight">
               Collab<span className="text-ember">Z</span>
             </span>
@@ -468,7 +468,7 @@ function HeroMock() {
           <span className="w-2.5 h-2.5 rounded-full bg-leaf/70" />
           <div className="ml-3 flex items-center gap-1.5 text-[13px] font-mono text-faint bg-panel border border-line rounded-md px-2.5 py-1">
             <Hash size={9} />
-            collabz.dev / general
+            mindsync.dev / general
           </div>
           <div className="ml-auto flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-leaf animate-pulse" />

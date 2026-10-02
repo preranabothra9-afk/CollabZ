@@ -350,7 +350,7 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="font-bold text-cream text-[13px] tracking-tight">CollabZ Control</span>
+              <span className="font-bold text-cream text-[13px] tracking-tight">MindSync Control</span>
               <span className="bg-ember/10 border border-ember/20 text-ember text-[12px] font-mono px-1.5 py-0.5 rounded font-bold">SaaS</span>
             </div>
             <p className="text-[13px] text-faint">Enterprise Administration Node</p>

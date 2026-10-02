@@ -1,5 +1,5 @@
 /**
- * CollabZ — "shared mind" illustration.
+ * MindSync — "shared mind" illustration.
  *
  * Replaces the blurred mesh-orb backgrounds with a single flat, warm drawing:
  * one workspace card with three model nodes wired into it, plus a pinned

@@ -16,13 +16,15 @@ export const THEMES: ThemeMeta[] = [
   { id: 'nebula', name: 'Nebula',   blurb: 'Deep violet dusk, soft glow',  swatch: ['#151022', '#1e1733', '#8b7cf8'] },
 ];
 
-const THEME_KEY = 'collabz-theme';
+const THEME_KEY = 'mindsync-theme';
 const VALID_THEMES: Theme[] = ['light', 'dark', 'nebula'];
 
 function getInitialTheme(): Theme {
   if (typeof window === 'undefined') return 'light';
   try {
-    const stored = localStorage.getItem(THEME_KEY);
+    // Fall back to the legacy `collabz-theme` key so returning users keep
+    // their chosen theme through the MindSync rebrand.
+    const stored = localStorage.getItem(THEME_KEY) ?? localStorage.getItem('collabz-theme');
     if (stored && VALID_THEMES.includes(stored as Theme)) return stored as Theme;
   } catch {
     /* localStorage unavailable */

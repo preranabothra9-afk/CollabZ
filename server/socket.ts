@@ -3,7 +3,9 @@ import { Server as HttpServer } from 'http';
 import jwt from 'jsonwebtoken';
 import { db } from './database';
 import { streamModel, AI_MODELS } from './ai';
-import { Message, PresenceUser } from '../src/types';
+import { extractClaims, buildRoomContext } from './context';
+import { detectContradictions } from './relations';
+import { Message, PresenceUser, Claim } from '../src/types';
 import { generateUUID, getJwtSecret } from './auth';
 
 // In-memory active presence track: workspaceId -> [ PresenceUsers ]
@@ -278,6 +280,13 @@ export function setupSocketIO(server: HttpServer) {
       // Broadcast Message Created to everyone (so cards with shimmer appear immediately in workspace!)
       io.to(roomName).emit('message-created', newMessage);
 
+      // Build the room's persistent context ONCE and share it with every
+      // selected model. Keeping this outside the per-model loop means N models
+      // cost one history lookup, not N, and every model sees identical grounding.
+      // The current message has no completed responses yet, so it is naturally
+      // excluded from its own context.
+      const { prompt: contextPrompt, hasContext } = await buildRoomContext(conversationId, promptText);
+
       // Execute comparative streaming asynchronously in parallel
       selectedModels.forEach(async (modelKey) => {
         try {
@@ -326,6 +335,45 @@ export function setupSocketIO(server: HttpServer) {
             });
           };
 
+          // Extract durable claims from the finished response and broadcast them
+          // to everyone in the room. Runs after the response is persisted, so a
+          // failure here never loses the answer itself. Purely heuristic — no
+          // extra model call, identical for every provider.
+          const broadcastNewClaims = async (finalText: string) => {
+            const extracted = extractClaims(finalText);
+            if (extracted.length === 0) return;
+
+            const modelConfig = AI_MODELS[modelKey];
+            const now = new Date().toISOString();
+            const claimDocs: Claim[] = extracted.map((c) => ({
+              id: generateUUID(),
+              conversationId,
+              messageId,
+              modelKey,
+              modelName: modelConfig ? modelConfig.name : modelKey,
+              text: c.text,
+              createdAt: now,
+            }));
+
+            const saved = await db.createClaims(claimDocs);
+            if (saved.length > 0) {
+              io.to(roomName).emit('claims-created', { messageId, modelKey, claims: saved });
+
+              // Measure the fresh claims against what the room already established.
+              // Best-effort like extraction itself: a failure here is contained, and
+              // never disturbs the response the user just received.
+              detectContradictions(conversationId, saved)
+                .then((relations) => {
+                  if (relations.length === 0) return;
+                  const contradictions = relations.filter((rel) => rel.relationship === 'CONTRADICT');
+                  if (contradictions.length > 0) {
+                    io.to(roomName).emit('contradiction-detected', { conversationId, relations: contradictions });
+                  }
+                })
+                .catch((e) => console.warn('[socket] contradiction detection failed:', e?.message || e));
+            }
+          };
+
           // Saves a user-requested stop with whatever text was already streamed.
           const completeStopped = async () => {
             const durationMs = Date.now() - startTime;
@@ -350,6 +398,11 @@ export function setupSocketIO(server: HttpServer) {
               durationMs,
               status: 'stopped'
             });
+
+            // A stopped stream may still contain complete, quotable sentences.
+            broadcastNewClaims(fullContent).catch((e) =>
+              console.warn('[socket] claim extraction after stop failed:', e?.message || e)
+            );
           };
 
           const onCompleteCallback = async (finalText: string) => {
@@ -384,6 +437,11 @@ export function setupSocketIO(server: HttpServer) {
               durationMs,
               status: 'completed'
             });
+
+            // Mine the finished answer for durable claims and broadcast them.
+            broadcastNewClaims(finalText).catch((e) =>
+              console.warn('[socket] claim extraction failed:', e?.message || e)
+            );
           };
 
           const onErrorCallback = async (err: string) => {
@@ -416,8 +474,10 @@ export function setupSocketIO(server: HttpServer) {
 
           // Route to centralized AI providers; transport is resolved from the registry.
           // The abort controller lets the client stop this model mid-stream.
+          // `contextPrompt` grounds the answer in the room's claims + recent
+          // history; it is identical across models, so the comparison stays fair.
           try {
-            await streamModel(modelKey, promptText, onChunkCallback, onCompleteCallback, onErrorCallback, controller.signal);
+            await streamModel(modelKey, contextPrompt, onChunkCallback, onCompleteCallback, onErrorCallback, controller.signal, hasContext);
           } finally {
             const current = activeGenerations.get(generationKey);
             if (current === generation) activeGenerations.delete(generationKey);

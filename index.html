@@ -9,7 +9,7 @@
   <script>
     (function () {
       try {
-        var t = localStorage.getItem('collabz-theme');
+        var t = localStorage.getItem('mindsync-theme') || localStorage.getItem('collabz-theme');
         if (t !== 'light' && t !== 'dark' && t !== 'nebula') {
           t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }
@@ -20,18 +20,18 @@
   </script>
 
   <!-- ─── Primary Title ─────────────────────────────────────────── -->
-  <title>CollabZ — Real-Time AI Collaboration Platform</title>
+  <title>MindSync — Real-Time AI Collaboration Platform</title>
 
   <!-- ─── SEO Meta Tags ─────────────────────────────────────────── -->
-  <meta name="description" content="CollabZ is a real-time multi-model AI collaboration platform. Stream responses from multiple AI models side-by-side, collaborate in shared workspaces, and gain enterprise-grade analytics — all in one unified interface." />
+  <meta name="description" content="MindSync is a real-time multi-model AI collaboration platform. Stream responses from multiple AI models side-by-side, collaborate in shared workspaces, and gain enterprise-grade analytics — all in one unified interface." />
   <meta name="keywords" content="AI collaboration, multi-model AI, real-time AI streaming, AI SaaS platform, collaborative AI workspace, enterprise AI, AI comparison tool, parallel AI inference, team AI workspace, AI analytics dashboard" />
-  <meta name="author" content="CollabZ Engineering" />
+  <meta name="author" content="MindSync Engineering" />
   <meta name="robots" content="index, follow" />
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#0a0b10" media="(prefers-color-scheme: dark)" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="application-name" content="CollabZ" />
-  <meta name="apple-mobile-web-app-title" content="CollabZ" />
+  <meta name="application-name" content="MindSync" />
+  <meta name="apple-mobile-web-app-title" content="MindSync" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -40,19 +40,19 @@
 
   <!-- ─── OpenGraph / Social Preview ────────────────────────────── -->
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="CollabZ — Real-Time AI Collaboration Platform" />
+  <meta property="og:title" content="MindSync — Real-Time AI Collaboration Platform" />
   <meta property="og:description" content="Stream, compare, and collaborate with multiple AI models in real-time. Enterprise-grade multi-model AI workspace for teams." />
   <meta property="og:image" content="/og-preview.png" />
-  <meta property="og:url" content="https://collabz.dev" />
-  <meta property="og:site_name" content="CollabZ" />
+  <meta property="og:url" content="https://mindsync.dev" />
+  <meta property="og:site_name" content="MindSync" />
   <meta property="og:locale" content="en_US" />
 
   <!-- ─── Twitter / X Card ──────────────────────────────────────── -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="CollabZ — Real-Time AI Collaboration Platform" />
+  <meta name="twitter:title" content="MindSync — Real-Time AI Collaboration Platform" />
   <meta name="twitter:description" content="Real-time multi-model AI streaming, side-by-side comparison, and collaborative workspaces. Built for teams." />
   <meta name="twitter:image" content="/og-preview.png" />
-  <meta name="twitter:site" content="@collabz" />
+  <meta name="twitter:site" content="@mindsync" />
 
   <!-- ─── Favicon System ────────────────────────────────────────── -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -128,7 +128,7 @@
     }
 
     #root:empty::after {
-      content: 'CollabZ';
+      content: 'MindSync';
       position: absolute;
       bottom: calc(50% - 50px);
       font-size: 15px;

@@ -1,6 +1,7 @@
 import { useStore } from '../store';
-import { Hash, Users, BookmarkCheck, Cpu, Circle, Wifi, LayoutGrid } from 'lucide-react';
+import { Hash, Users, BookmarkCheck, Cpu, Circle, Wifi, LayoutGrid, Globe } from 'lucide-react';
 import SearchPanel from './SearchPanel';
+import ClaimsPanel from './ClaimsPanel';
 
 const MODEL_LABELS: Record<string, string> = {
   'gemini-2.5-flash': 'Gemini 2.5',
@@ -65,6 +66,7 @@ export default function WorkspaceHeader() {
             <span key={key} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[13px] font-mono font-semibold ${MODEL_COLORS[key] || 'bg-ember/10 text-ember border-ember/20'}`}>
               <Circle size={4} className="fill-current" />
               {MODEL_LABELS[key] || key}
+              {key === 'gemini-2.5-flash' && <span title="Searches the web"><Globe size={9} className="text-sky-400" /></span>}
             </span>
           ))}
         </div>
@@ -97,6 +99,9 @@ export default function WorkspaceHeader() {
 
       {/* Room search */}
       <SearchPanel />
+
+      {/* Room claims (persistent AI context) */}
+      <ClaimsPanel />
 
       {/* Pinned Toggle */}
       <button type="button" onClick={() => setSavedResponsesOpen(!isSavedResponsesOpen)}

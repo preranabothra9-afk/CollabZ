@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore, type SearchResult } from '../store';
 import { Search, X, Loader2, CornerDownRight } from 'lucide-react';
+import Portal from '../hooks/Portal';
 
 const PANEL_WIDTH = 380;
 
@@ -102,7 +103,7 @@ export default function SearchPanel() {
       </button>
 
       {open && (
-        <>
+        <Portal>
           <div className="fixed inset-0 z-[150]" onClick={() => setOpen(false)} />
 
           <div
@@ -181,7 +182,7 @@ export default function SearchPanel() {
               </div>
             )}
           </div>
-        </>
+        </Portal>
       )}
     </>
   );

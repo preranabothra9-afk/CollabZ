@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
-import { ArrowDown, ArrowUp, Network, Loader2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Network, Loader2, Trash2 } from 'lucide-react';
 import MessageRow from './MessageRow';
 
 export default function ChatArea() {
-  const { messages, activeConversation, saveResponse, savedResponses, deleteSavedResponse, submitPrompt, stopGeneration, hasMoreMessages, isLoadingOlder, loadOlderMessages, highlightMessageId, setHighlightMessageId } = useStore();
+  const { messages, activeConversation, saveResponse, savedResponses, deleteSavedResponse, submitPrompt, stopGeneration, hasMoreMessages, isLoadingOlder, loadOlderMessages, highlightMessageId, setHighlightMessageId, deleteMessage, clearChat } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [copiedIdMap, setCopiedIdMap] = useState<Record<string, boolean>>({});
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   // Inline prompt editing: id of the message being edited.
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Two-step guard for clearing the whole room, matching the claims clear-all.
+  const [confirmingClear, setConfirmingClear] = useState(false);
   // Viewport anchor (px from bottom) preserved when older messages are prepended.
   const prependAnchorRef = useRef<number | null>(null);
   // Whether the reader is parked at the bottom of the feed. Drives the
@@ -44,19 +46,54 @@ export default function ChatArea() {
     if (isNearBottomRef.current) scrollToBottom();
   }, [messages, highlightMessageId]);
 
-  // Scroll to and flash a jumped-to message once it is present in the feed.
+  // Which highlight id we have already animated to. Streaming token updates
+  // swap `messages` constantly; without this we would restart a smooth scroll
+  // on every token and the jump would never land.
+  const jumpedForRef = useRef<string | null>(null);
+
+  // Auto-release the highlight ring shortly after the jump. Deliberately
+  // independent of `messages` so streaming tokens can't keep resetting it.
   useEffect(() => {
-    if (!highlightMessageId) return;
-    const el = document.getElementById(`msg-${highlightMessageId}`);
-    if (!el) return; // still paging history in — keep the lock
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!highlightMessageId) {
+      jumpedForRef.current = null;
+      return;
+    }
     const t = setTimeout(() => setHighlightMessageId(null), 2600);
     return () => clearTimeout(t);
-  }, [highlightMessageId, messages, setHighlightMessageId]);
+  }, [highlightMessageId, setHighlightMessageId]);
+
+  // Centre the jumped-to message in the feed. Scrolls the container directly
+  // via getBoundingClientRect math rather than relying on scrollIntoView, and
+  // re-centres instantly whenever layout shifts (e.g. a model still streaming).
+  useEffect(() => {
+    if (!highlightMessageId) return;
+    const container = scrollRef.current;
+    const el = document.getElementById(`msg-${highlightMessageId}`);
+    if (!container || !el) return; // still paging history in — keep the lock
+
+    const centerInstantly = () => {
+      const rel = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+      container.style.scrollBehavior = 'auto';
+      container.scrollTop = Math.max(0, rel - container.clientHeight / 2 + el.offsetHeight / 2);
+      container.style.scrollBehavior = '';
+    };
+
+    if (jumpedForRef.current !== highlightMessageId) {
+      // First arrival: animate, then guarantee we land even if a smooth scroll
+      // is interrupted by a streaming token update.
+      jumpedForRef.current = highlightMessageId;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const t = setTimeout(centerInstantly, 500);
+      return () => clearTimeout(t);
+    }
+    // Already centred here once — a token update moved the row, so re-centre.
+    centerInstantly();
+  }, [highlightMessageId, messages]);
 
   // Land a freshly opened room on the newest messages.
   useEffect(() => {
     isNearBottomRef.current = true;
+    setConfirmingClear(false);
   }, [activeConversation?.id]);
 
   const handleLoadOlder = async () => {
@@ -107,6 +144,22 @@ export default function ChatArea() {
   const startEditing = useCallback((id: string) => setEditingId(id), []);
   const cancelEditing = useCallback(() => setEditingId(null), []);
 
+  // Clearing mid-generation would let a completion handler write the message
+  // straight back, so the control waits for every model to finish. The server
+  // refuses it too (HTTP 409).
+  const anyBusy = messages.some((m) =>
+    Object.values(m.modelResponses).some((r) => r.status === 'streaming' || r.status === 'pending')
+  );
+
+  const handleClearChat = async () => {
+    if (!confirmingClear) {
+      setConfirmingClear(true);
+      return;
+    }
+    await clearChat();
+    setConfirmingClear(false);
+  };
+
   if (!activeConversation) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-sand p-6 select-none relative overflow-hidden">
@@ -127,6 +180,30 @@ export default function ChatArea() {
   return (
     <div className="flex-1 flex flex-col min-h-0 relative bg-transparent">
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-8 scroll-smooth mx-auto max-w-5xl w-full">
+        {messages.length > 0 && (
+          <div className="flex justify-end sticky top-0 z-10">
+            <button
+              type="button"
+              onClick={handleClearChat}
+              disabled={anyBusy}
+              title={
+                anyBusy
+                  ? 'Wait for the current response to finish before clearing'
+                  : confirmingClear
+                  ? 'Click again to confirm — this removes every prompt, response, claim, and contradiction in this room'
+                  : 'Remove every prompt and response in this room'
+              }
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-lg border backdrop-blur-sm transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                confirmingClear
+                  ? 'bg-rust/15 border-rust/40 text-rust'
+                  : 'bg-panel/90 border-line/60 text-faint hover:text-rust hover:border-rust/40'
+              }`}
+            >
+              <Trash2 size={12} />
+              {confirmingClear ? 'Confirm clear all chat?' : 'Clear all chat'}
+            </button>
+          </div>
+        )}
         {messages.length > 0 && hasMoreMessages && (
           <div className="flex justify-center pt-1">
             <button type="button" onClick={handleLoadOlder} disabled={isLoadingOlder}
@@ -163,6 +240,7 @@ export default function ChatArea() {
               onPinToggle={handlePinToggle}
               onStop={stopGeneration}
               onSubmitPrompt={submitPrompt}
+              onDelete={deleteMessage}
             />
           ))
         )}

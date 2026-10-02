@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAuth, requireRole, adminOnly, AuthenticatedRequest, generateUUID } from './auth';
 import { db, UserModel, WorkspaceModel, MessageModel, ConversationModel, SavedResponseModel, AuditLogModel } from './database';
-import { Workspace, Conversation, SavedResponse, User } from '../src/types';
+import { Workspace, Conversation, SavedResponse, User, ClaimRelation, DiscussionComment, ContradictionVote, ContradictionVoteChoice } from '../src/types';
 import { createWorkspaceSchema, createChannelSchema, inviteUserSchema, submitPromptSchema } from './validators';
 import { getIo } from './socket';
 import { AI_MODELS, isModelConfigured, DEFAULT_COMPARISON_MODELS } from './ai';
@@ -306,6 +306,353 @@ router.get('/messages/:conversationId/search', requireAuth, async (req: Authenti
     return res.status(500).json({ error: 'Failed to search messages' });
   }
 });
+
+// Claims extracted from a room's AI responses (the room's persistent memory)
+router.get('/messages/:conversationId/claims', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 30;
+    const claims = await db.getClaims(req.params.conversationId, limit);
+    return res.status(200).json({ claims });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to retrieve room claims' });
+  }
+});
+
+// Delete one claim from a room
+router.delete('/messages/:conversationId/claims/:claimId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const deleted = await db.deleteClaim(req.params.conversationId, req.params.claimId);
+    if (!deleted) return res.status(404).json({ error: 'Claim not found in this room' });
+    return res.status(200).json({ claimId: req.params.claimId });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to delete claim' });
+  }
+});
+
+// Clear every claim from a room
+router.delete('/messages/:conversationId/claims', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const deletedCount = await db.deleteClaimsByConversation(req.params.conversationId);
+    return res.status(200).json({ deletedCount });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to clear room claims' });
+  }
+});
+
+/** Loads a room and confirms the caller belongs to its workspace. */
+async function loadConversationForRequest(
+  req: AuthenticatedRequest,
+  res: Response,
+  conversationId: string
+): Promise<Conversation | null> {
+  const conversation = await db.getConversationById(conversationId);
+  if (!conversation) {
+    res.status(404).json({ error: 'Room not found' });
+    return null;
+  }
+  const workspace = await db.getWorkspaceById(conversation.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return null;
+  }
+  const isMember = workspace.ownerId === req.user!.id || (workspace.memberIds || []).includes(req.user!.id);
+  const isAdmin = req.user!.role === 'admin';
+  if (!isMember && !isAdmin) {
+    res.status(403).json({ error: 'Only workspace members can modify this room' });
+    return null;
+  }
+  return conversation;
+}
+
+// Remove one prompt and its response card(s), plus the claims they produced.
+// Registered after the /claims routes so this two-segment pattern can never
+// shadow DELETE /messages/:conversationId/claims.
+router.delete('/messages/:conversationId/:messageId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const conv = await loadConversationForRequest(req, res, req.params.conversationId);
+    if (!conv) return;
+
+    const deleted = await db.deleteMessage(conv.id, req.params.messageId);
+    if (!deleted) {
+      return res.status(409).json({ error: 'This message is still being generated and cannot be removed yet' });
+    }
+    return res.status(200).json({ conversationId: conv.id, messageId: req.params.messageId });
+  } catch (err: any) {
+    console.error('Error deleting message:', err);
+    return res.status(500).json({ error: 'Failed to delete the message' });
+  }
+});
+
+// Clear the whole room's chat history, keeping the room itself. The room's
+// memory (claims + contradictions) is derived from these messages, so it goes too.
+router.delete('/messages/:conversationId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const conv = await loadConversationForRequest(req, res, req.params.conversationId);
+    if (!conv) return;
+
+    const deletedCount = await db.clearConversationMessages(conv.id);
+    if (deletedCount === -1) {
+      return res.status(409).json({ error: 'A model is still responding in this room. Wait for it to finish, then clear the chat.' });
+    }
+    return res.status(200).json({ conversationId: conv.id, deletedCount });
+  } catch (err: any) {
+    console.error('Error clearing room chat:', err);
+    return res.status(500).json({ error: 'Failed to clear the chat' });
+  }
+});
+
+// Contradiction-graph edges: relationships between a room's claims
+router.get('/messages/:conversationId/relations', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 40;
+    const relations = await db.getClaimRelations(req.params.conversationId, limit);
+    return res.status(200).json({ relations });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to retrieve claim relationships' });
+  }
+});
+
+// ─── CONTRADICTION DISCUSSIONS ──────────────────────────────────────────
+// The human side of a contradiction: a comment thread with replies, a room
+// poll with one vote per user, and an explicit close by an authorized human.
+//
+// Participation (comment, reply, vote) is open to every workspace member.
+// Closing (resolve / dismiss) is restricted to the workspace owner or a global
+// admin — the same authorization the workspace's own deletion requires.
+//
+// The poll tally and the detector's confidence are deliberately never inputs to
+// the edge's status. A contradiction closes only when a human says so.
+
+/** Resolves a contradiction + its room + workspace and checks the caller is a member. */
+async function loadRelationContext(
+  req: AuthenticatedRequest,
+  res: Response,
+  conversationId: string,
+  relationId: string
+): Promise<{ relation: ClaimRelation; conversation: Conversation; workspace: Workspace } | null> {
+  const relation = await db.getClaimRelationById(conversationId, relationId);
+  if (!relation) {
+    res.status(404).json({ error: 'Contradiction not found in this room' });
+    return null;
+  }
+
+  const conversation = await db.getConversationById(conversationId);
+  if (!conversation) {
+    res.status(404).json({ error: 'Room not found' });
+    return null;
+  }
+
+  const workspace = await db.getWorkspaceById(conversation.workspaceId);
+  if (!workspace) {
+    res.status(404).json({ error: 'Workspace not found' });
+    return null;
+  }
+
+  const isMember = workspace.ownerId === req.user!.id || (workspace.memberIds || []).includes(req.user!.id);
+  const isAdmin = req.user!.role === 'admin';
+  if (!isMember && !isAdmin) {
+    res.status(403).json({ error: 'Only workspace members can take part in this discussion' });
+    return null;
+  }
+
+  return { relation, conversation, workspace };
+}
+
+/** Broadcasts a discussion event to every client in the room's workspace. */
+function emitDiscussionEvent(
+  conversationId: string,
+  workspaceId: string,
+  event: string,
+  payload: Record<string, unknown>
+): void {
+  const io = getIo();
+  if (!io) return;
+  io.to(`workspace:${workspaceId}`).emit(event, { conversationId, ...payload });
+}
+
+// The full discussion for one contradiction: comments and poll votes.
+router.get('/messages/:conversationId/relations/:relationId/discussion', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ctx = await loadRelationContext(req, res, req.params.conversationId, req.params.relationId);
+    if (!ctx) return;
+
+    const discussion = await db.getDiscussion(ctx.relation.id);
+    return res.status(200).json(discussion);
+  } catch (err: any) {
+    console.error('Error fetching contradiction discussion:', err);
+    return res.status(500).json({ error: 'Failed to retrieve the discussion' });
+  }
+});
+
+// Add a comment or a reply to a contradiction's thread.
+router.post('/messages/:conversationId/relations/:relationId/comments', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ctx = await loadRelationContext(req, res, req.params.conversationId, req.params.relationId);
+    if (!ctx) return;
+
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (text.length < 1 || text.length > 1000) {
+      return res.status(400).json({ error: 'A comment must be between 1 and 1000 characters' });
+    }
+
+    // A reply must point at a real comment in this same thread.
+    const parentId = typeof req.body?.parentId === 'string' && req.body.parentId.trim()
+      ? req.body.parentId.trim()
+      : null;
+    if (parentId && !(await db.commentExists(ctx.relation.id, parentId))) {
+      return res.status(400).json({ error: 'The comment being replied to no longer exists' });
+    }
+
+    const comment: DiscussionComment = {
+      id: generateUUID(),
+      relationId: ctx.relation.id,
+      conversationId: ctx.conversation.id,
+      authorId: req.user!.id,
+      authorName: req.user!.name,
+      authorAvatar: req.user!.avatar,
+      text,
+      parentId,
+      createdAt: new Date().toISOString()
+    };
+
+    const saved = await db.addComment(comment);
+
+    emitDiscussionEvent(ctx.conversation.id, ctx.workspace.id, 'contradiction-comment-added', {
+      relationId: ctx.relation.id,
+      comment: saved
+    });
+
+    return res.status(201).json(saved);
+  } catch (err: any) {
+    console.error('Error adding contradiction comment:', err);
+    return res.status(500).json({ error: 'Failed to add the comment' });
+  }
+});
+
+// Delete a comment. Authors delete their own; owners/admins delete anyone's.
+router.delete('/messages/:conversationId/relations/:relationId/comments/:commentId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ctx = await loadRelationContext(req, res, req.params.conversationId, req.params.relationId);
+    if (!ctx) return;
+
+    const canModerate = ctx.workspace.ownerId === req.user!.id || req.user!.role === 'admin';
+    const deleted = await db.deleteComment(ctx.relation.id, req.params.commentId, req.user!.id, canModerate);
+    if (!deleted) {
+      return res.status(403).json({ error: 'You can only delete your own comments' });
+    }
+
+    emitDiscussionEvent(ctx.conversation.id, ctx.workspace.id, 'contradiction-comment-deleted', {
+      relationId: ctx.relation.id,
+      commentId: req.params.commentId
+    });
+
+    return res.status(200).json({ commentId: req.params.commentId });
+  } catch (err: any) {
+    console.error('Error deleting contradiction comment:', err);
+    return res.status(500).json({ error: 'Failed to delete the comment' });
+  }
+});
+
+// Cast or change a poll vote. One vote per user is enforced by the schema's
+// unique index, so this is an upsert by (relationId, userId).
+router.post('/messages/:conversationId/relations/:relationId/vote', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ctx = await loadRelationContext(req, res, req.params.conversationId, req.params.relationId);
+    if (!ctx) return;
+
+    const choice = typeof req.body?.choice === 'string' ? req.body.choice.toUpperCase() : '';
+    const VALID_CHOICES: ContradictionVoteChoice[] = ['CLAIM_A', 'CLAIM_B', 'NEITHER'];
+    if (!VALID_CHOICES.includes(choice as ContradictionVoteChoice)) {
+      return res.status(400).json({ error: 'Vote must be one of: CLAIM_A, CLAIM_B, NEITHER' });
+    }
+
+    const vote: ContradictionVote = {
+      id: generateUUID(),
+      relationId: ctx.relation.id,
+      conversationId: ctx.conversation.id,
+      userId: req.user!.id,
+      userName: req.user!.name,
+      choice: choice as ContradictionVoteChoice,
+      createdAt: new Date().toISOString()
+    };
+
+    await db.setVote(vote);
+
+    // Return + broadcast the whole tally so every client renders identical bars.
+    const votes = await db.getVotes(ctx.relation.id);
+    emitDiscussionEvent(ctx.conversation.id, ctx.workspace.id, 'contradiction-vote-updated', {
+      relationId: ctx.relation.id,
+      votes
+    });
+
+    return res.status(200).json({ relationId: ctx.relation.id, votes });
+  } catch (err: any) {
+    console.error('Error recording contradiction vote:', err);
+    return res.status(500).json({ error: 'Failed to record the vote' });
+  }
+});
+
+/**
+ * Closes a contradiction as resolved or dismissed. Owner-or-admin only, and a
+ * reason is mandatory. This is the only path to a closed status — never the
+ * poll tally, never the detector's confidence.
+ */
+async function handleCloseContradiction(
+  req: AuthenticatedRequest,
+  res: Response,
+  status: 'resolved' | 'evidence-needed' | 'dismissed'
+) {
+  try {
+    const ctx = await loadRelationContext(req, res, req.params.conversationId, req.params.relationId);
+    if (!ctx) return;
+
+    if (ctx.workspace.ownerId !== req.user!.id && req.user!.role !== 'admin') {
+      return res.status(403).json({ error: 'Only the workspace owner or an admin can resolve or dismiss a contradiction' });
+    }
+
+    const resolution = typeof req.body?.resolution === 'string' ? req.body.resolution.trim() : '';
+    if (resolution.length < 3) {
+      return res.status(400).json({ error: 'A short reason is required to close a contradiction' });
+    }
+
+    const updated = await db.resolveRelation(ctx.conversation.id, ctx.relation.id, {
+      status,
+      resolution,
+      resolvedBy: req.user!.id,
+      resolvedByName: req.user!.name
+    });
+    if (!updated) {
+      return res.status(404).json({ error: 'Contradiction not found in this room' });
+    }
+
+    await db.logAudit(
+      req.user!.id,
+      req.user!.name,
+      req.user!.email,
+      status === 'resolved' ? 'CONTRADICTION_RESOLVED' : status === 'evidence-needed' ? 'CONTRADICTION_EVIDENCE_NEEDED' : 'CONTRADICTION_DISMISSED',
+      `Closed contradiction ${ctx.relation.id} in room "${ctx.conversation.title}" as ${status}: ${resolution}`,
+      ctx.workspace.id,
+      req.ip
+    );
+
+    emitDiscussionEvent(ctx.conversation.id, ctx.workspace.id, 'contradiction-closed', {
+      relationId: updated.id,
+      relation: updated
+    });
+
+    return res.status(200).json({ relation: updated });
+  } catch (err: any) {
+    console.error('Error closing contradiction:', err);
+    return res.status(500).json({ error: 'Failed to close the contradiction' });
+  }
+}
+
+// NOTE: the path segments are the typed status values
+// ('resolved' | 'evidence-needed' | 'dismissed') the client builds the URL
+// from — keep them in sync with the store action.
+router.post('/messages/:conversationId/relations/:relationId/resolved', requireAuth, (req, res) => handleCloseContradiction(req as AuthenticatedRequest, res, 'resolved'));
+router.post('/messages/:conversationId/relations/:relationId/evidence-needed', requireAuth, (req, res) => handleCloseContradiction(req as AuthenticatedRequest, res, 'evidence-needed'));
+router.post('/messages/:conversationId/relations/:relationId/dismissed', requireAuth, (req, res) => handleCloseContradiction(req as AuthenticatedRequest, res, 'dismissed'));
 
 // --- SAVED RESPONSES ROUTER ---
 // Get saved responses for workspace
@@ -868,7 +1215,7 @@ router.get('/admin/workspaces', requireAuth, requireRole('admin'), async (req: A
         id: ws._id,
         name: ws.name,
         description: ws.description,
-        owner: owner ? { name: owner.name, email: owner.email, avatar: owner.avatar } : { name: 'System', email: 'nova-system@collabz.io', avatar: 'SYS' },
+        owner: owner ? { name: owner.name, email: owner.email, avatar: owner.avatar } : { name: 'System', email: 'nova-system@mindsync.io', avatar: 'SYS' },
         membersCount: ws.memberIds ? ws.memberIds.length : 1,
         channelsCount,
         savedCount,

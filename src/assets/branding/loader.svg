@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none">
   <defs>
-    <linearGradient id="loader-grad" x1="0" y1="0" x2="80" y2="80">
+    <linearGradient id="ms-grad" x1="0" y1="0" x2="80" y2="80">
       <stop offset="0%" stop-color="#6366f1"/>
       <stop offset="50%" stop-color="#4f46e5"/>
       <stop offset="100%" stop-color="#4338ca"/>
@@ -17,19 +17,20 @@
     .dash-flow { animation: dash 2s linear infinite; stroke-dasharray: 40 160; }
   </style>
   <!-- Outer rotating ring -->
-  <circle cx="40" cy="40" r="36" stroke="url(#loader-grad)" stroke-width="1" opacity="0.2" class="spin-ring"/>
-  <circle cx="40" cy="40" r="36" stroke="url(#loader-grad)" stroke-width="1.5" class="spin-ring dash-flow"/>
-  <!-- Synapse triangle paths -->
-  <path d="M28 52 L40 20 L52 52" stroke="url(#loader-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <path d="M28 52 L52 52" stroke="url(#loader-grad)" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
-  <!-- Signal curve -->
-  <path d="M33 36 Q40 42 47 36" stroke="#6366f1" stroke-width="1" stroke-linecap="round" fill="none" opacity="0.5"/>
-  <!-- Pulsing neural nodes -->
-  <circle cx="40" cy="20" r="4" fill="#6366f1" class="node-pulse"/>
-  <circle cx="28" cy="52" r="3.5" fill="#4f46e5" class="node-pulse-delay"/>
-  <circle cx="52" cy="52" r="3.5" fill="#4338ca" class="node-pulse-delay2"/>
+  <circle cx="40" cy="40" r="36" stroke="url(#ms-grad)" stroke-width="1" opacity="0.2" class="spin-ring"/>
+  <circle cx="40" cy="40" r="36" stroke="url(#ms-grad)" stroke-width="1.5" class="spin-ring dash-flow"/>
+  <!-- The "M" — two uprights joined by a central notch -->
+  <path d="M28 54 L28 18 L40 34 L52 18 L52 54" stroke="url(#ms-grad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Baseline -->
+  <path d="M28 54 L52 54" stroke="url(#ms-grad)" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
+  <!-- Sync oscillation ripple -->
+  <path d="M32 45 Q36 42 40 45 Q44 48 48 45" stroke="#6366f1" stroke-width="1" stroke-linecap="round" fill="none" opacity="0.5"/>
+  <!-- Pulsing nodes at the three peaks -->
+  <circle cx="28" cy="18" r="4" fill="#6366f1" class="node-pulse"/>
+  <circle cx="40" cy="34" r="3.5" fill="#4f46e5" class="node-pulse-delay"/>
+  <circle cx="52" cy="18" r="3.5" fill="#4338ca" class="node-pulse-delay2"/>
   <!-- Inner white dots -->
-  <circle cx="40" cy="20" r="1.5" fill="white" opacity="0.9"/>
-  <circle cx="28" cy="52" r="1.2" fill="white" opacity="0.8"/>
-  <circle cx="52" cy="52" r="1.2" fill="white" opacity="0.8"/>
+  <circle cx="28" cy="18" r="1.5" fill="white" opacity="0.9"/>
+  <circle cx="40" cy="34" r="1.2" fill="white" opacity="0.8"/>
+  <circle cx="52" cy="18" r="1.2" fill="white" opacity="0.8"/>
 </svg>

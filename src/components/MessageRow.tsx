@@ -1,6 +1,6 @@
 import { memo, useCallback, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Copy, ClipboardCheck, Bookmark, BookmarkCheck, ShieldCheck, Zap, Bot, Square, Pencil, X, Send } from 'lucide-react';
+import { Copy, ClipboardCheck, Bookmark, BookmarkCheck, ShieldCheck, Zap, Bot, Square, Pencil, X, Send, Trash2 } from 'lucide-react';
 import type { Message } from '../types';
 
 interface MessageRowProps {
@@ -15,6 +15,8 @@ interface MessageRowProps {
   onPinToggle: (prompt: string, modelName: string, content: string, senderName: string) => void;
   onStop: (messageId: string, modelKey: string) => void;
   onSubmitPrompt: (text: string) => void;
+  /** Removes this whole row — the prompt and every response card. */
+  onDelete: (messageId: string) => void;
 }
 
 /**
@@ -37,8 +39,15 @@ function MessageRowImpl({
   onPinToggle,
   onStop,
   onSubmitPrompt,
+  onDelete,
 }: MessageRowProps) {
   const [editText, setEditText] = useState(msg.promptText);
+
+  // A row still being generated can't be removed — the completion handler
+  // would write it straight back. The server enforces this too (HTTP 409).
+  const isBusy = Object.values(msg.modelResponses).some(
+    (r) => r.status === 'streaming' || r.status === 'pending'
+  );
 
   const handleStartEdit = () => {
     setEditText(msg.promptText);
@@ -117,6 +126,11 @@ function MessageRowImpl({
                 <button type="button" onClick={() => onCopy(msg.promptText, `${msg.id}_prompt`)} title="Copy"
                   className="p-1 rounded-md text-faint hover:text-cream hover:bg-line/60 transition-all cursor-pointer">
                   {copiedMap[`${msg.id}_prompt`] ? <ClipboardCheck size={11} className="text-leaf" /> : <Copy size={11} />}
+                </button>
+                <button type="button" onClick={() => onDelete(msg.id)} disabled={isBusy}
+                  title={isBusy ? 'Wait for the response to finish before removing' : 'Remove this prompt and its response'}
+                  className="p-1 rounded-md text-faint hover:text-rust hover:bg-line/60 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+                  <Trash2 size={11} />
                 </button>
               </div>
             </div>

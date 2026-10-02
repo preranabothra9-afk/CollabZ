@@ -89,7 +89,7 @@ export default function InviteModal({ isOpen, onClose }: InviteModalProps) {
                 id="invite-email"
                 type="email"
                 required
-                placeholder="collaborator@collabz.io"
+                placeholder="collaborator@mindsync.io"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-ink border border-line rounded-xl pl-10 pr-3.5 py-3 text-[13px] text-cream placeholder-faint focus:outline-none focus:border-ember/60 focus:ring-2 focus:ring-ember/10 transition-all"

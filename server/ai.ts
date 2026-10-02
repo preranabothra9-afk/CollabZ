@@ -37,6 +37,12 @@ export interface AIModelConfig {
   maxTokens?: number;
   /** True when the upstream provider gates this model behind a paid plan. */
   requiresPaidPlan?: boolean;
+  /**
+   * True when this model can ground answers with a live provider-side web
+   * search (Google Search grounding for the Google transport). Models without
+   * this answer only from their training data, so current events can be stale.
+   */
+  webSearch?: boolean;
   status: AIModelStatus;
 }
 
@@ -52,6 +58,9 @@ export const AI_MODELS: Record<string, AIModelConfig> = {
     signupUrl: 'https://aistudio.google.com/apikey',
     freeTier: 'Free tier, no credit card',
     maxTokens: 4096,
+    // Grounds answers with Google Search so current facts (office holders,
+    // prices, versions) come from the live web rather than frozen training data.
+    webSearch: true,
     status: 'active'
   },
   'gpt-oss-120b': {
@@ -442,7 +451,7 @@ export function generateOfflineFallbackResponse(prompt: string): string {
   const cleanPrompt = prompt.toLowerCase();
   
   if (cleanPrompt.includes('hello') || cleanPrompt.includes('hi') || cleanPrompt.includes('hey')) {
-    return `### 👋 Welcome to CollabZ Workspace!
+    return `### 👋 Welcome to MindSync Workspace!
 *(Offline Recovery Mode Active 🛡️)*
 
 Hello! I have temporarily transitioned to **Offline Recovery Fallback Mode** because we detected that Google's Gemini servers are currently experiencing exceptional demand and rate-limits.
@@ -514,7 +523,7 @@ export function WorkspaceAlert() {
   }
 
   // Elegant generic intelligent response
-  return `### 🛰️ CollabZ Offline Workspace Engine
+  return `### 🛰️ MindSync Offline Workspace Engine
 *(Offline Recovery Mode Active 🛡️)*
 
 **Note:** The global Gemini AI service is currently experiencing exceptionally high demand. To keep your workspace interactive, I have activated the **Local Offline Recovery Engine**.
@@ -597,7 +606,8 @@ export async function streamRealGemini(
   onChunk: (text: string) => void,
   onComplete: (fullText: string) => void,
   onError: (errMessage: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  webSearch?: boolean
 ) {
   const client = getGeminiClient();
   if (!client) {
@@ -610,21 +620,43 @@ export async function streamRealGemini(
     );
   }
 
+  // Google Search grounding is attached only where the provider accepts it.
+  // The 2.x flash family supports the legacy `googleSearch` tool; the 3.x
+  // flash-lite lineage that the cascade falls back to does not, so grounding
+  // is scoped to the primary model to keep the fallbacks functional.
+  const GROUNDED_MODEL = 'gemini-2.5-flash';
+  const buildParams = (modelName: string) => {
+    const config: Record<string, unknown> = {};
+    if (webSearch && modelName === GROUNDED_MODEL) {
+      config.tools = [{ googleSearch: {} }];
+    }
+    // Propagating the abort signal cancels the underlying HTTP request. Without
+    // it, a Stop pressed while the model is still working towards its first
+    // token would only be honoured once a chunk arrived — grounding adds a web
+    // search step, so that wait could be long and Stop felt dead.
+    if (signal) config.abortSignal = signal;
+    return { model: modelName, contents: prompt, config };
+  };
+
   const tryStream = async (modelName: string) => {
-    const stream = await retryWithBackoff(() => client.models.generateContentStream({
-      model: modelName,
-      contents: prompt,
-    }));
+    const stream = await retryWithBackoff(() => client.models.generateContentStream(buildParams(modelName)));
 
     let fullText = '';
-    for await (const chunk of stream) {
-      // User pressed Stop: return what we already streamed.
-      if (signal?.aborted) return { text: fullText, stopped: true };
-      const text = chunk.text || '';
-      if (text) {
-        fullText += text;
-        onChunk(text);
+    try {
+      for await (const chunk of stream) {
+        // User pressed Stop: return what we already streamed.
+        if (signal?.aborted) return { text: fullText, stopped: true };
+        const text = chunk.text || '';
+        if (text) {
+          fullText += text;
+          onChunk(text);
+        }
       }
+    } catch (err: any) {
+      // The abort signal cancels the in-flight request; whatever was already
+      // streamed is the user's partial answer, so keep it rather than erroring.
+      if (signal?.aborted) return { text: fullText, stopped: true };
+      throw err;
     }
     return { text: fullText, stopped: false };
   };
@@ -714,7 +746,8 @@ export async function streamModel(
   onChunk: (text: string) => void,
   onComplete: (fullText: string) => void,
   onError: (errMessage: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  skipGrounding?: boolean
 ): Promise<void> {
   const config = AI_MODELS[modelKey];
 
@@ -729,7 +762,10 @@ export async function streamModel(
   }
 
   if (config.transport === 'google-sdk') {
-    await streamRealGemini(prompt, onChunk, onComplete, onError, signal);
+    // `skipGrounding` is set when the room already has an established context:
+    // the room's own history is the source of truth there, and live web search
+    // would contradict (and refuse) the premises the room was built on.
+    await streamRealGemini(prompt, onChunk, onComplete, onError, signal, config.webSearch && !skipGrounding);
     return;
   }
 

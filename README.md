@@ -1,4 +1,4 @@
-# CollabZ — Real-Time Multi-Model AI Collaboration Platform
+# MindSync — Real-Time Multi-Model AI Collaboration Platform
 
 [![React](https://img.shields.io/badge/React-19.0-61DAFB?style=for-the-badge&logo=react&logoColor=white)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -10,13 +10,13 @@
 [![JWT](https://img.shields.io/badge/Security-JWT_HttpOnly-FF007F?style=for-the-badge&logo=jsonwebtokens&logoColor=white)](https://jwt.io/)
 [![RBAC](https://img.shields.io/badge/Control-RBAC_Enterprise-orange?style=for-the-badge)](https://en.wikipedia.org/wiki/Role-based_access_control)
 
-CollabZ is a production-grade, real-time MERN SaaS platform that redefines how teams interact with Artificial Intelligence. Rather than restricting prompting to an isolated, single-user window, CollabZ introduces a high-performance **multiplayer workspace** where product managers, software engineers, and researchers can collaboratively refine prompts, stream comparative responses from Google Gemini and other simulated LLMs simultaneously, track administrative telemetry, and audit workspace security.
+MindSync is a production-grade, real-time MERN SaaS platform that redefines how teams interact with Artificial Intelligence. Rather than restricting prompting to an isolated, single-user window, MindSync introduces a high-performance **multiplayer workspace** where product managers, software engineers, and researchers can collaboratively refine prompts, stream comparative responses from Google Gemini and other simulated LLMs simultaneously, track administrative telemetry, and audit workspace security.
 
 ---
 
 ## 🚀 2. Project Overview
 
-CollabZ is an enterprise-grade solution designed to eliminate the single-user silos in modern generative AI tools. By shifting prompting into a real-time collaborative workspace, teams can build better prompt pipelines together. 
+MindSync is an enterprise-grade solution designed to eliminate the single-user silos in modern generative AI tools. By shifting prompting into a real-time collaborative workspace, teams can build better prompt pipelines together. 
 
 ### Core Value Pillars:
 *   **Real-Time AI Collaboration:** Low-latency multiplayer rooms powered by WebSockets ensure that when one user edits a prompt or alters configurations, the entire team witnesses the changes instantly.
@@ -101,7 +101,7 @@ CollabZ is an enterprise-grade solution designed to eliminate the single-user si
 
 ## 📊 5. System Architecture
 
-CollabZ organizes workflows across distinct system layers, maintaining separate boundaries for data storage, real-time messaging, and application execution:
+MindSync organizes workflows across distinct system layers, maintaining separate boundaries for data storage, real-time messaging, and application execution:
 
 ```
 +-----------------------------------------------------------------------------+
@@ -149,7 +149,7 @@ CollabZ organizes workflows across distinct system layers, maintaining separate 
 
 ## 🔐 6. Authentication Flow
 
-CollabZ features a secure authentication architecture leveraging dual-token rotation, cross-site scripting (XSS) defenses, and strict access controls.
+MindSync features a secure authentication architecture leveraging dual-token rotation, cross-site scripting (XSS) defenses, and strict access controls.
 
 ```
 Client App (Zustand)           Express API Gateway               Database (MongoDB)
@@ -319,7 +319,7 @@ JWT_SECRET="synapse-ai-exclusive-quantum-secret-2026"
 CLIENT_URL="http://localhost:3000"
 
 # MongoDB Database Connection URI
-MONGO_URI="mongodb+srv://admin-user:StrongPassword@cluster.mongodb.net/collabz"
+MONGO_URI="mongodb+srv://admin-user:StrongPassword@cluster.mongodb.net/MindSync"
 
 # LLM Integrations
 GEMINI_API_KEY="your_api_key"
@@ -373,7 +373,7 @@ Run your backend in a persistent container environment supporting active WebSock
 
 ## 🔒 13. Security Implementation
 
-CollabZ is hardened against modern web application vulnerabilities:
+MindSync is hardened against modern web application vulnerabilities:
 
 *   **JWT Security:** Implements stateless validation for request handling. Access tokens are kept in-memory to prevent browser storage sniffing.
 *   **Refresh Token Rotation:** Employs a rotation model where the server replaces the old refresh token with a new one upon session refresh. If a token reuse conflict is detected, the database revokes the active session keys instantly to lock out unauthorized access.
@@ -462,4 +462,4 @@ To maintain responsiveness under collaborative loads, the platform implements se
 
 ## 📄 18. License
 
-Distributed under the MIT License. See [LICENSE](file:///C:\Users\Admin\Desktop\AI-Workspace_MERN\collabz-realtime-platform\LICENSE) for more information.
+Distributed under the MIT License. See [LICENSE](file:///C:\Users\Admin\Desktop\AI-Workspace_MERN\MindSync-realtime-platform\LICENSE) for more information.

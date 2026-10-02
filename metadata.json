@@ -1,5 +1,5 @@
 {
-  "name": "CollabZ",
+  "name": "MindSync",
   "description": "Real-time collaborative AI workspace with multi-model comparison, shared chats, live streaming, presence, and history",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

@@ -1,7 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import fs from 'fs';
 import path from 'path';
-import { User, Workspace, Conversation, Message, SavedResponse } from '../src/types';
+import { User, Workspace, Conversation, Message, SavedResponse, Claim, ClaimRelation, DiscussionComment, ContradictionVote, ContradictionDiscussion } from '../src/types';
 import { generateUUID } from './auth';
 
 // Connection function for live remote environment deployment
@@ -143,9 +143,97 @@ const SavedResponseSchema = new Schema({
   toObject: { virtuals: true }
 });
 
-// AuditLog Schema
-const AuditLogSchema = new Schema({
+// Claim Schema
+// A durable, quotable statement extracted from an AI response. Claims give a
+// room a persistent memory that later prompts are grounded in, so models answer
+// with the ongoing discussion in mind instead of treating each prompt in a
+// vacuum.
+const ClaimSchema = new Schema({
   _id: { type: String, default: generateUUID },
+  conversationId: { type: String, required: true, index: true },
+  messageId: { type: String, required: true, index: true },
+  modelKey: { type: String, required: true },
+  modelName: { type: String, required: true },
+  text: { type: String, required: true },
+  createdAt: { type: String, default: () => new Date().toISOString(), index: true }
+}, {
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// An edge in the room's contradiction graph, linking two claims. The pair is
+// stored in canonical (sorted) order with a unique index so the same two claims
+// can only ever form one edge, whichever direction the detection came from.
+const ClaimRelationSchema = new Schema({
+  _id: { type: String, default: generateUUID },
+  conversationId: { type: String, required: true, index: true },
+  claimAId: { type: String, required: true },
+  claimBId: { type: String, required: true },
+  claimAText: { type: String, required: true },
+  claimBText: { type: String, required: true },
+  claimAModelName: { type: String, required: true },
+  claimBModelName: { type: String, required: true },
+  relationship: { type: String, required: true, enum: ['SUPPORT', 'CONTRADICT', 'RELATED', 'UNCERTAIN'], index: true },
+  confidence: { type: Number, required: true, min: 0, max: 1, default: 0.5 },
+  explanation: { type: String, required: true },
+  // 'detected' is the only value the detector writes. 'resolved',
+  // 'evidence-needed' and 'dismissed' are set exclusively by an authorized
+  // human closing the contradiction's discussion — never by the poll tally or
+  // the confidence. 'evidence-needed' is the room declining to pick a side.
+  status: { type: String, required: true, default: 'detected', enum: ['detected', 'resolved', 'evidence-needed', 'dismissed'], index: true },
+  /** The reason an authorized human recorded when closing the contradiction. */
+  resolution: { type: String, default: null },
+  resolvedBy: { type: String, default: null },
+  resolvedByName: { type: String, default: null },
+  resolvedAt: { type: String, default: null },
+  createdAt: { type: String, default: () => new Date().toISOString(), index: true }
+}, {
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Enforces one relationship per claim pair regardless of detection direction.
+ClaimRelationSchema.index({ claimAId: 1, claimBId: 1 }, { unique: true });
+
+// A comment or reply in a contradiction's human discussion thread. Top-level
+// comments carry no parentId; replies point at the comment they answer, so a
+// thread is one level deep — enough to answer a point without nesting noise.
+const DiscussionCommentSchema = new Schema({
+  _id: { type: String, default: generateUUID },
+  relationId: { type: String, required: true, index: true },
+  conversationId: { type: String, required: true, index: true },
+  authorId: { type: String, required: true },
+  authorName: { type: String, required: true },
+  authorAvatar: { type: String, default: '' },
+  text: { type: String, required: true },
+  parentId: { type: String, default: null, index: true },
+  createdAt: { type: String, default: () => new Date().toISOString(), index: true }
+}, {
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// One user's vote in a contradiction poll. The unique (relationId, userId)
+// index is what makes the poll "one vote per user" — voting again updates the
+// choice instead of inserting a second row.
+const ContradictionVoteSchema = new Schema({
+  _id: { type: String, default: generateUUID },
+  relationId: { type: String, required: true, index: true },
+  conversationId: { type: String, required: true, index: true },
+  userId: { type: String, required: true },
+  userName: { type: String, required: true },
+  choice: { type: String, required: true, enum: ['CLAIM_A', 'CLAIM_B', 'NEITHER'] },
+  createdAt: { type: String, default: () => new Date().toISOString() }
+}, {
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Enforces one vote per user per contradiction.
+ContradictionVoteSchema.index({ relationId: 1, userId: 1 }, { unique: true });
+
+// AuditLog Schema
+const AuditLogSchema = new Schema({  _id: { type: String, default: generateUUID },
   userId: { type: String, index: true },
   userName: { type: String },
   userEmail: { type: String, index: true },
@@ -160,7 +248,7 @@ const AuditLogSchema = new Schema({
 });
 
 // Virtual conversions for MERN front-end schema compliance
-for (const schema of [UserSchema, WorkspaceSchema, ConversationSchema, MessageSchema, SavedResponseSchema, AuditLogSchema]) {
+for (const schema of [UserSchema, WorkspaceSchema, ConversationSchema, MessageSchema, SavedResponseSchema, ClaimSchema, ClaimRelationSchema, DiscussionCommentSchema, ContradictionVoteSchema, AuditLogSchema]) {
   schema.virtual('id').get(function() {
     return this._id;
   });
@@ -172,6 +260,10 @@ export const WorkspaceModel = (mongoose.models.Workspace || mongoose.model('Work
 export const ConversationModel = (mongoose.models.Conversation || mongoose.model('Conversation', ConversationSchema)) as any;
 export const MessageModel = (mongoose.models.Message || mongoose.model('Message', MessageSchema)) as any;
 export const SavedResponseModel = (mongoose.models.SavedResponse || mongoose.model('SavedResponse', SavedResponseSchema)) as any;
+export const ClaimModel = (mongoose.models.Claim || mongoose.model('Claim', ClaimSchema)) as any;
+export const ClaimRelationModel = (mongoose.models.ClaimRelation || mongoose.model('ClaimRelation', ClaimRelationSchema)) as any;
+export const DiscussionCommentModel = (mongoose.models.DiscussionComment || mongoose.model('DiscussionComment', DiscussionCommentSchema)) as any;
+export const ContradictionVoteModel = (mongoose.models.ContradictionVote || mongoose.model('ContradictionVote', ContradictionVoteSchema)) as any;
 export const AuditLogModel = (mongoose.models.AuditLog || mongoose.model('AuditLog', AuditLogSchema)) as any;
 
 // Seed standard workspace if DB is blank (for Mongo mode)
@@ -188,7 +280,7 @@ async function seedDefaultMongoData() {
         await UserModel.create({
           _id: systemUserId,
           name: 'NovaAI Core',
-          email: 'nova-system@collabz.io',
+          email: 'nova-system@mindsync.io',
           password: 'N/A_SYSTEM_USER_NO_PASSWORD',
           avatar: 'SYSTEM',
           role: 'admin'
@@ -216,17 +308,17 @@ async function seedDefaultMongoData() {
         senderId: systemUserId,
         senderName: 'NovaAI Core',
         senderAvatar: 'SYSTEM',
-        promptText: 'Analyze CollabZ workspace architecture.',
+        promptText: 'Analyze MindSync workspace architecture.',
         modelResponses: {
           'gemini-2.5-flash': {
             modelName: 'Gemini 2.5 Flash',
-            content: 'Hello! I am Gemini 2.5 Flash. I am fully integrated into **CollabZ** to support streamable team diagnostics, dynamic modeling, and high-fidelity code execution. In this workspace, you can trigger models simultaneously and compare results, observe live presence, edit prompts collaboratively, and save insights instantly.',
+            content: 'Hello! I am Gemini 2.5 Flash. I am fully integrated into **MindSync** to support streamable team diagnostics, dynamic modeling, and high-fidelity code execution. In this workspace, you can trigger models simultaneously and compare results, observe live presence, edit prompts collaboratively, and save insights instantly.',
             status: 'completed',
             durationMs: 420
           },
           'gpt-oss-120b': {
             modelName: 'GPT-OSS 120B',
-            content: 'CollabZ operates as a real-time full-stack environment. It enables multi-model cross-examination where multiple collaborators query distinct intelligent agents simultaneously.',
+            content: 'MindSync operates as a real-time full-stack environment. It enables multi-model cross-examination where multiple collaborators query distinct intelligent agents simultaneously.',
             status: 'completed',
             durationMs: 780
           }
@@ -377,8 +469,15 @@ class MongoDatabaseAdapter {
     if (res.deletedCount === 0) return false;
 
     // Cascade deletions with clean queries
+    const conversations = await ConversationModel.find({ workspaceId: id }).select('_id').lean();
+    const conversationIds = conversations.map((c: any) => c._id);
     await ConversationModel.deleteMany({ workspaceId: id });
     await SavedResponseModel.deleteMany({ workspaceId: id });
+    await ClaimModel.deleteMany({ conversationId: { $in: conversationIds } });
+    await ClaimRelationModel.deleteMany({ conversationId: { $in: conversationIds } });
+    // A contradiction's human discussion dies with the room it lived in.
+    await DiscussionCommentModel.deleteMany({ conversationId: { $in: conversationIds } });
+    await ContradictionVoteModel.deleteMany({ conversationId: { $in: conversationIds } });
     return true;
   }
 
@@ -416,6 +515,11 @@ class MongoDatabaseAdapter {
     const res = await ConversationModel.deleteOne({ _id: id });
     if (res.deletedCount === 0) return false;
     await MessageModel.deleteMany({ conversationId: id });
+    await ClaimModel.deleteMany({ conversationId: id });
+    await ClaimRelationModel.deleteMany({ conversationId: id });
+    // The room's contradiction discussions go with its contradictions.
+    await DiscussionCommentModel.deleteMany({ conversationId: id });
+    await ContradictionVoteModel.deleteMany({ conversationId: id });
     return true;
   }
 
@@ -455,7 +559,13 @@ class MongoDatabaseAdapter {
       .lean();
 
     const hasMore = docs.length > limit;
-    const page = docs.slice(0, limit).reverse();
+    // `.lean()` skips the `id` virtual, so map `_id` -> `id` explicitly. The
+    // client keys message rows and jump-to-message lookups off `msg.id`; without
+    // this every history message arrives with `id === undefined`.
+    const page = docs
+      .slice(0, limit)
+      .reverse()
+      .map((d: any) => ({ ...d, id: d._id }));
     return { messages: page as unknown as Message[], hasMore };
   }
 
@@ -565,6 +675,341 @@ class MongoDatabaseAdapter {
     const d = await MessageModel.findByIdAndUpdate(id, updates, { new: true }).lean();
     if (!d) return undefined;
     return { ...d, id: d._id } as unknown as Message;
+  }
+
+  // --- CLAIM METHODS ---
+  // Claims are the room's persistent memory. See `server/context.ts` for the
+  // extraction heuristic and the context preamble that consumes them.
+
+  /**
+   * Bulk-inserts claims for one response. De-duplicates on
+   * (messageId, modelKey, text) so a retried or re-broadcast extraction can
+   * never double-store the same statement.
+   */
+  async createClaims(claims: Claim[]): Promise<Claim[]> {
+    if (!claims || claims.length === 0) return [];
+    try {
+      const docs = claims.map((c) => ({
+        _id: c.id || generateUUID(),
+        conversationId: c.conversationId,
+        messageId: c.messageId,
+        modelKey: c.modelKey,
+        modelName: c.modelName,
+        text: c.text,
+        createdAt: c.createdAt || new Date().toISOString()
+      }));
+      const created = await ClaimModel.insertMany(docs, { ordered: false });
+      return created.map((c: any) => ({ ...c.toJSON(), id: c._id })) as unknown as Claim[];
+    } catch (err: any) {
+      // `ordered: false` keeps every valid doc even if one is a duplicate-key
+      // dupe of an earlier insert; only surface genuine failures.
+      if (err?.code === 11000) return [];
+      console.error('Failed to store extracted claims:', err?.message || err);
+      return [];
+    }
+  }
+
+  /** Newest-first claims for a room, bounded by `limit`. */
+  async getClaims(conversationId: string, limit = 30): Promise<Claim[]> {
+    const docs = await ClaimModel.find({ conversationId })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(Math.min(Math.max(limit, 1), 100))
+      .lean();
+    return docs.map((d: any) => ({ ...d, id: d._id })) as unknown as Claim[];
+  }
+
+  /** Deletes one claim, scoped to its room so a stale client id can't touch another room. */
+  async deleteClaim(conversationId: string, claimId: string): Promise<boolean> {
+    const res = await ClaimModel.deleteOne({ _id: claimId, conversationId });
+    if (res.deletedCount > 0) {
+      await this.deleteClaimRelationsForClaim(claimId);
+    }
+    return res.deletedCount > 0;
+  }
+
+  /** Deletes every claim in a room. */
+  async deleteClaimsByConversation(conversationId: string): Promise<number> {
+    const res = await ClaimModel.deleteMany({ conversationId });
+    await ClaimRelationModel.deleteMany({ conversationId });
+    // Clearing the room's memory also clears every contradiction discussion it
+    // held — comments and poll votes have no meaning without their edge.
+    await DiscussionCommentModel.deleteMany({ conversationId });
+    await ContradictionVoteModel.deleteMany({ conversationId });
+    return res.deletedCount || 0;
+  }
+
+  // --- CLAIM RELATION METHODS (the contradiction graph) ---
+
+  /**
+   * Stores one contradiction-graph edge. The claim pair is canonicalised
+   * (sorted) before writing and the schema carries a unique index on the pair,
+   * so a duplicate detection is a harmless no-op rather than a second edge.
+   * Returns null when the pair was already related — callers can treat that as
+   * "nothing new to broadcast".
+   */
+  async createClaimRelation(relation: ClaimRelation): Promise<ClaimRelation | null> {
+    const [claimAId, claimBId] = [relation.claimAId, relation.claimBId].sort();
+    if (claimAId === claimBId) return null;
+    try {
+      const created = await ClaimRelationModel.create({
+        _id: relation.id || generateUUID(),
+        conversationId: relation.conversationId,
+        claimAId,
+        claimBId,
+        claimAText: relation.claimAText,
+        claimBText: relation.claimBText,
+        claimAModelName: relation.claimAModelName,
+        claimBModelName: relation.claimBModelName,
+        relationship: relation.relationship,
+        confidence: Math.min(Math.max(relation.confidence ?? 0.5, 0), 1),
+        explanation: relation.explanation,
+        status: relation.status || 'detected',
+        createdAt: relation.createdAt || new Date().toISOString()
+      });
+      return { ...created.toObject(), id: created._id } as unknown as ClaimRelation;
+    } catch (err: any) {
+      // Duplicate-key means another detection already recorded this pair.
+      if (err?.code === 11000) return null;
+      console.error('Failed to store claim relation:', err?.message || err);
+      return null;
+    }
+  }
+
+  /** Newest-first relationship edges for a room, bounded by `limit`. */
+  async getClaimRelations(conversationId: string, limit = 40): Promise<ClaimRelation[]> {
+    const docs = await ClaimRelationModel.find({ conversationId })
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(Math.min(Math.max(limit, 1), 100))
+      .lean();
+    return docs.map((d: any) => ({ ...d, id: d._id })) as unknown as ClaimRelation[];
+  }
+
+  /** Removes every edge that touches a claim, when that claim is deleted. */
+  async deleteClaimRelationsForClaim(claimId: string): Promise<number> {
+    const relations = await ClaimRelationModel.find({
+      $or: [{ claimAId: claimId }, { claimBId: claimId }]
+    }).select('_id').lean();
+    const relationIds = relations.map((r: any) => r._id as string);
+
+    // A contradiction's discussion is attached to the edge, not the claims, so
+    // it must be torn down with the edge.
+    await this.deleteDiscussionForRelations(relationIds);
+
+    const res = await ClaimRelationModel.deleteMany({ _id: { $in: relationIds } });
+    return res.deletedCount || 0;
+  }
+
+  // --- CONTRADICTION DISCUSSION METHODS ---
+  // The human side of the contradiction graph: a comment thread with replies
+  // and a room poll. Status transitions live with the relation itself; these
+  // methods never touch status, and never derive it from votes or confidence.
+
+  /** Drops every comment and vote attached to the given contradiction edges. */
+  async deleteDiscussionForRelations(relationIds: string[]): Promise<void> {
+    if (!relationIds || relationIds.length === 0) return;
+    await DiscussionCommentModel.deleteMany({ relationId: { $in: relationIds } });
+    await ContradictionVoteModel.deleteMany({ relationId: { $in: relationIds } });
+  }
+
+  /** One contradiction edge, scoped to its room so a stale id can't read another room. */
+  async getClaimRelationById(conversationId: string, relationId: string): Promise<ClaimRelation | undefined> {
+    const d = await ClaimRelationModel.findOne({ _id: relationId, conversationId }).lean();
+    if (!d) return undefined;
+    return { ...d, id: d._id } as unknown as ClaimRelation;
+  }
+
+  /** The full discussion for one contradiction: comments (chronological) and poll votes. */
+  async getDiscussion(relationId: string): Promise<ContradictionDiscussion> {
+    const [commentDocs, voteDocs] = await Promise.all([
+      DiscussionCommentModel.find({ relationId }).sort({ createdAt: 1, _id: 1 }).lean(),
+      ContradictionVoteModel.find({ relationId }).lean(),
+    ]);
+    return {
+      comments: commentDocs.map((d: any) => ({ ...d, id: d._id })) as unknown as DiscussionComment[],
+      votes: voteDocs.map((d: any) => ({ ...d, id: d._id })) as unknown as ContradictionVote[],
+    };
+  }
+
+  /** Stores one comment or reply. */
+  async addComment(comment: DiscussionComment): Promise<DiscussionComment> {
+    const created = await DiscussionCommentModel.create({
+      _id: comment.id || generateUUID(),
+      relationId: comment.relationId,
+      conversationId: comment.conversationId,
+      authorId: comment.authorId,
+      authorName: comment.authorName,
+      authorAvatar: comment.authorAvatar || '',
+      text: comment.text,
+      parentId: comment.parentId || null,
+      createdAt: comment.createdAt || new Date().toISOString()
+    });
+    return { ...created.toObject(), id: created._id } as unknown as DiscussionComment;
+  }
+
+  /** Whether a comment exists in this thread — used to validate a reply target. */
+  async commentExists(relationId: string, commentId: string): Promise<boolean> {
+    const doc = await DiscussionCommentModel.findOne({ _id: commentId, relationId }).select('_id').lean();
+    return !!doc;
+  }
+
+  /**
+   * Deletes one comment. Authors may delete their own; the workspace owner and
+   * admins may delete anyone's (moderation). The scoping filters keep a comment
+   * from being pulled out of another room's thread.
+   */
+  async deleteComment(relationId: string, commentId: string, userId: string, moderator: boolean): Promise<boolean> {
+    const filter: Record<string, unknown> = { _id: commentId, relationId };
+    if (!moderator) filter.authorId = userId;
+    const res = await DiscussionCommentModel.deleteOne(filter);
+    return res.deletedCount > 0;
+  }
+
+  /**
+   * Records one user's poll vote, or changes it if they have already voted. The
+   * unique (relationId, userId) index is the "one vote per user" guarantee; a
+   * race between two first-votes lands on a duplicate-key error, which is
+   * handled by falling back to an update of the surviving row.
+   */
+  async setVote(vote: ContradictionVote): Promise<ContradictionVote> {
+    const existing = await ContradictionVoteModel.findOne({
+      relationId: vote.relationId, userId: vote.userId
+    });
+    if (existing) {
+      existing.choice = vote.choice;
+      existing.userName = vote.userName;
+      await existing.save();
+      return { ...existing.toObject(), id: existing._id } as unknown as ContradictionVote;
+    }
+
+    try {
+      const created = await ContradictionVoteModel.create({
+        _id: vote.id || generateUUID(),
+        relationId: vote.relationId,
+        conversationId: vote.conversationId,
+        userId: vote.userId,
+        userName: vote.userName,
+        choice: vote.choice,
+        createdAt: vote.createdAt || new Date().toISOString()
+      });
+      return { ...created.toObject(), id: created._id } as unknown as ContradictionVote;
+    } catch (err: any) {
+      if (err?.code !== 11000) throw err;
+      const again = await ContradictionVoteModel.findOne({
+        relationId: vote.relationId, userId: vote.userId
+      });
+      if (!again) throw err;
+      again.choice = vote.choice;
+      again.userName = vote.userName;
+      await again.save();
+      return { ...again.toObject(), id: again._id } as unknown as ContradictionVote;
+    }
+  }
+
+  /** Every vote cast in a contradiction's poll. */
+  async getVotes(relationId: string): Promise<ContradictionVote[]> {
+    const docs = await ContradictionVoteModel.find({ relationId }).lean();
+    return docs.map((d: any) => ({ ...d, id: d._id })) as unknown as ContradictionVote[];
+  }
+
+  /**
+   * Closes a contradiction as `resolved` or `dismissed`, recording who closed it
+   * and why. This is the ONLY place the closed statuses are written — the poll
+   * tally and the detector's confidence are never inputs to it.
+   */
+  async resolveRelation(
+    conversationId: string,
+    relationId: string,
+    closure: { status: 'resolved' | 'evidence-needed' | 'dismissed'; resolution: string; resolvedBy: string; resolvedByName: string }
+  ): Promise<ClaimRelation | undefined> {
+    const d = await ClaimRelationModel.findOneAndUpdate(
+      { _id: relationId, conversationId },
+      {
+        status: closure.status,
+        resolution: closure.resolution,
+        resolvedBy: closure.resolvedBy,
+        resolvedByName: closure.resolvedByName,
+        resolvedAt: new Date().toISOString()
+      },
+      { new: true }
+    ).lean();
+    if (!d) return undefined;
+    return { ...d, id: d._id } as unknown as ClaimRelation;
+  }
+
+  /**
+   * Tears down the room memory attached to a set of claims: every contradiction
+   * edge they participate in, and the human discussion on each of those edges.
+   * Shared by single-message deletion and whole-room clearing.
+   */
+  private async cascadeClaims(claimIds: string[]): Promise<void> {
+    if (!claimIds || claimIds.length === 0) return;
+    const rels = await ClaimRelationModel.find({
+      $or: [{ claimAId: { $in: claimIds } }, { claimBId: { $in: claimIds } }]
+    }).select('_id').lean();
+    const relationIds = rels.map((r: any) => r._id as string);
+    await this.deleteDiscussionForRelations(relationIds);
+    await ClaimRelationModel.deleteMany({ _id: { $in: relationIds } });
+    await ClaimModel.deleteMany({ _id: { $in: claimIds } });
+  }
+
+  /** Whether any model on a message is still pending or mid-stream. */
+  private async isMessageBusy(messageId: string): Promise<boolean> {
+    const doc = await MessageModel.findOne({ _id: messageId }).select('modelResponses').lean();
+    if (!doc) return false;
+    return Object.values(doc.modelResponses || {}).some(
+      (r: any) => r?.status === 'streaming' || r?.status === 'pending'
+    );
+  }
+
+  /**
+   * Deletes one prompt and its response card(s). The claims the response
+   * produced go with it, cascading to their contradiction edges and discussions,
+   * so no room memory outlives the message it came from.
+   *
+   * Returns false when the message is missing or a model is still generating —
+   * deleting mid-stream would let the completion handler resurrect the row.
+   */
+  async deleteMessage(conversationId: string, messageId: string): Promise<boolean> {
+    const exists = await MessageModel.findOne({ _id: messageId, conversationId }).select('_id').lean();
+    if (!exists) return false;
+    if (await this.isMessageBusy(messageId)) return false;
+
+    const claimDocs = await ClaimModel.find({ conversationId, messageId }).select('_id').lean();
+    await this.cascadeClaims(claimDocs.map((c: any) => c._id as string));
+
+    const res = await MessageModel.deleteOne({ _id: messageId, conversationId });
+    return res.deletedCount > 0;
+  }
+
+  /**
+   * Clears every prompt and response in a room, keeping the room itself. The
+   * room's whole memory goes with it — claims, contradiction edges, and their
+   * discussions — because all of it was derived from the messages being removed.
+   *
+   * Returns -1 when a model is still generating anywhere in the room, for the
+   * same reason as deleteMessage.
+   */
+  async clearConversationMessages(conversationId: string): Promise<number> {
+    // In-flight streams always sit on the newest messages, so a bounded reverse
+    // scan is enough to spot a busy room without walking the whole history.
+    const recent = await MessageModel.find({ conversationId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .select('modelResponses')
+      .lean();
+    const busy = recent.some((m: any) =>
+      Object.values(m.modelResponses || {}).some((r: any) => r?.status === 'streaming' || r?.status === 'pending')
+    );
+    if (busy) return -1;
+
+    const claimDocs = await ClaimModel.find({ conversationId }).select('_id').lean();
+    await this.cascadeClaims(claimDocs.map((c: any) => c._id as string));
+    // Belt-and-braces: any discussion data not reached through an edge.
+    await DiscussionCommentModel.deleteMany({ conversationId });
+    await ContradictionVoteModel.deleteMany({ conversationId });
+
+    const res = await MessageModel.deleteMany({ conversationId });
+    return res.deletedCount || 0;
   }
 
   // --- SAVED RESPONSE METHODS ---
